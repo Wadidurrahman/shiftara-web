@@ -1,20 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { Search, Edit2, Trash2, UserPlus } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, Trash2, Users, Search, KeyRound, Phone, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from "@/components/ui/table";
 import Modal from "@/components/ui/Modal";
-import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabase";
 
 interface Employee {
@@ -22,210 +12,299 @@ interface Employee {
   name: string;
   role: string;
   phone: string;
-  status: "active" | "inactive";
+  pin: string;
+  status: string;
 }
 
 export default function EmployeesPage() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // Default loading true saat awal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     name: "",
-    role: "",
+    role: "Barista Senior",
     phone: "",
-    status: "active",
+    pin: "",
   });
 
-  async function fetchEmployees() {
-    setIsLoading(true);
+  // ✅ PERBAIKAN: Fungsi ini HANYA mengambil data, tidak mengubah state loading sendiri
+  const fetchEmployees = useCallback(async () => {
     const { data, error } = await supabase
       .from("employees")
       .select("*")
-      .order("name", { ascending: true });
+      .order("created_at", { ascending: false });
 
-    if (!error && data) {
-      setEmployees(data);
+    if (error) {
+      console.error(error);
+    } else {
+      setEmployees(data || []);
     }
-    setIsLoading(false);
-  }
-
-  useEffect(() => {
-    (async () => {
-      await fetchEmployees();
-    })();
   }, []);
 
-  async function handleSubmit() {
-    if (!formData.name || !formData.role) return;
+  // ✅ PERBAIKAN: Loading diatur di sini, terpisah dari fungsi fetch
+  useEffect(() => {
+    const initData = async () => {
+      setIsLoading(true);
+      await fetchEmployees();
+      setIsLoading(false);
+    };
+    initData();
+  }, [fetchEmployees]);
 
-    const { error } = await supabase
-      .from("employees")
-      .insert([
-        { 
-          name: formData.name, 
-          role: formData.role, 
-          phone: formData.phone,
-          status: "active" 
-        }
-      ])
-      .select();
-
-    if (!error) {
-      setFormData({ name: "", role: "", phone: "", status: "active" });
-      setIsModalOpen(false);
-      fetchEmployees();
+  const handleOpenModal = (employee?: Employee) => {
+    if (employee) {
+      setEditingId(employee.id);
+      setFormData({
+        name: employee.name,
+        role: employee.role,
+        phone: employee.phone || "",
+        pin: employee.pin || "",
+      });
+    } else {
+      setEditingId(null);
+      setFormData({ name: "", role: "Barista Senior", phone: "", pin: "" });
     }
-  }
+    setIsModalOpen(true);
+  };
 
-  async function handleDelete(id: string) {
-    if (confirm("Apakah Anda yakin ingin menghapus karyawan ini?")) {
-      const { error } = await supabase
+  const handleSave = async () => {
+    if (!formData.name || !formData.pin) {
+      alert("Nama dan PIN wajib diisi!");
+      return;
+    }
+
+    setIsLoading(true); // Mulai loading saat tombol ditekan
+
+    let error;
+
+    if (editingId) {
+      const { error: updateError } = await supabase
         .from("employees")
-        .delete()
-        .eq("id", id);
-
-      if (!error) {
-        fetchEmployees();
-      }
+        .update({
+          name: formData.name,
+          role: formData.role,
+          phone: formData.phone,
+          pin: formData.pin,
+        })
+        .eq("id", editingId);
+      error = updateError;
+    } else {
+      const { error: insertError } = await supabase.from("employees").insert([
+        {
+          name: formData.name,
+          role: formData.role,
+          phone: formData.phone,
+          pin: formData.pin,
+          status: "active",
+        },
+      ]);
+      error = insertError;
     }
-  }
 
-  const filteredEmployees = employees.filter(emp => 
-    emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    emp.role.toLowerCase().includes(searchTerm.toLowerCase())
+    if (error) {
+      alert("Gagal menyimpan: " + error.message);
+    } else {
+      await fetchEmployees(); // Refresh data tanpa mengatur loading lagi (karena dihandle di bawah)
+      setIsModalOpen(false);
+    }
+    setIsLoading(false); // Selesai loading
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Yakin ingin menghapus karyawan ini? Data jadwal mereka juga akan hilang.")) return;
+
+    setIsLoading(true);
+    const { error } = await supabase.from("employees").delete().eq("id", id);
+    if (!error) {
+      await fetchEmployees();
+    } else {
+      alert("Gagal menghapus: " + error.message);
+    }
+    setIsLoading(false);
+  };
+
+  const filteredEmployees = employees.filter((emp) =>
+    emp.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="flex flex-col h-full space-y-6">
+      {/* HEADER */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-6 border border-slate-300 shadow-sm rounded-sm">
         <div>
-          <h2 className="text-3xl font-black tracking-tight text-primary">Data Karyawan</h2>
-          <p className="text-slate-500 font-medium">Kelola informasi personil dan status kepegawaian.</p>
+          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+            <Users className="w-6 h-6 text-primary" /> Data Karyawan
+          </h1>
+          <p className="text-slate-500 text-sm mt-1">
+            Manajemen database personel dan akses sistem.
+          </p>
         </div>
-        <Button onClick={() => setIsModalOpen(true)} className="bg-secondary text-primary hover:bg-secondary/90 font-bold shadow-md rounded-md">
-          <UserPlus className="w-5 h-5 mr-2" />
-          Tambah Karyawan
+        <Button 
+          onClick={() => handleOpenModal()} 
+          className="bg-primary hover:bg-primary/90 text-white font-semibold shadow-sm rounded-sm"
+        >
+          <Plus className="w-4 h-4 mr-2" /> Tambah Personel
         </Button>
       </div>
 
-      <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-          <Input 
-            placeholder="Cari nama atau posisi..." 
-            className="pl-10 border-slate-200 focus-visible:ring-primary rounded-md"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+      {/* SEARCH BAR */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+        <Input 
+          placeholder="Cari ID atau Nama Karyawan..." 
+          className="pl-9 bg-white border-slate-300 focus:border-primary rounded-sm shadow-sm"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+      </div>
+
+      {/* TABLE */}
+      <div className="bg-white border border-slate-300 shadow-sm rounded-sm overflow-hidden flex-1">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-100 border-b border-slate-300">
+              <tr>
+                <th className="p-4 font-semibold text-slate-800 uppercase tracking-wider text-xs">Nama Lengkap</th>
+                <th className="p-4 font-semibold text-slate-800 uppercase tracking-wider text-xs">Jabatan</th>
+                <th className="p-4 font-semibold text-slate-800 uppercase tracking-wider text-xs">Kontak</th>
+                <th className="p-4 font-semibold text-slate-800 uppercase tracking-wider text-xs">PIN Akses</th>
+                <th className="p-4 font-semibold text-slate-800 uppercase tracking-wider text-xs text-right">Kontrol</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {isLoading ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-slate-500 italic">Sinkronisasi data...</td>
+                </tr>
+              ) : filteredEmployees.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-slate-500">Tidak ada data ditemukan.</td>
+                </tr>
+              ) : (
+                filteredEmployees.map((emp) => (
+                  <tr key={emp.id} className="hover:bg-slate-50 transition-colors group">
+                    <td className="p-4 font-bold text-slate-800 border-r border-transparent group-hover:border-slate-200">{emp.name}</td>
+                    <td className="p-4 border-r border-transparent group-hover:border-slate-200">
+                      <span className={`px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide border ${
+                        emp.role.includes("Manager") ? "bg-purple-50 text-purple-700 border-purple-200" :
+                        emp.role.includes("Barista") ? "bg-orange-50 text-orange-700 border-orange-200" :
+                        "bg-blue-50 text-blue-700 border-blue-200"
+                      }`}>
+                        {emp.role}
+                      </span>
+                    </td>
+                    <td className="p-4 text-slate-600 border-r border-transparent group-hover:border-slate-200">
+                       {emp.phone ? <div className="flex items-center gap-2"><Phone className="w-3 h-3" /> {emp.phone}</div> : <span className="text-slate-300">-</span>}
+                    </td>
+                    <td className="p-4 font-mono text-slate-700 border-r border-transparent group-hover:border-slate-200">
+                        <div className="flex items-center gap-2">
+                            <KeyRound className="w-3 h-3 text-slate-400" /> 
+                            <span className="bg-slate-100 px-1.5 py-0.5 border border-slate-300 text-xs">{emp.pin}</span>
+                        </div>
+                    </td>
+                    <td className="p-4 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          onClick={() => handleOpenModal(emp)} 
+                          className="h-8 w-8 rounded-sm border-slate-300 hover:border-blue-500 hover:text-blue-600"
+                          title="Edit Data"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          onClick={() => handleDelete(emp.id)} 
+                          className="h-8 w-8 rounded-sm border-slate-300 hover:border-red-500 hover:text-red-600 hover:bg-red-50"
+                          title="Hapus Karyawan"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-lg shadow-md overflow-hidden">
-        <Table>
-          <TableHeader className="bg-slate-100/80">
-            <TableRow>
-              <TableHead className="font-bold text-primary uppercase text-xs tracking-wider">Nama Lengkap</TableHead>
-              <TableHead className="font-bold text-primary uppercase text-xs tracking-wider">Posisi</TableHead>
-              <TableHead className="font-bold text-primary uppercase text-xs tracking-wider">No. HP</TableHead>
-              <TableHead className="font-bold text-primary uppercase text-xs tracking-wider">Status</TableHead>
-              <TableHead className="font-bold text-primary uppercase text-xs tracking-wider text-right">Aksi</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center py-10 text-slate-400">Memuat data...</TableCell>
-              </TableRow>
-            ) : filteredEmployees.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center py-10 text-slate-400">Tidak ada data karyawan.</TableCell>
-              </TableRow>
-            ) : (
-              filteredEmployees.map((emp, index) => (
-                <motion.tr 
-                  key={emp.id} 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  className="hover:bg-slate-50/80 transition-colors border-b border-slate-100 last:border-none"
-                >
-                  <TableCell className="py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center font-black text-primary text-sm border border-primary/20 shadow-sm">
-                        {emp.name.charAt(0)}
-                      </div>
-                      <div>
-                        <p className="font-bold text-slate-800 text-sm">{emp.name}</p>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-slate-600 text-sm font-semibold">{emp.role}</TableCell>
-                  <TableCell className="text-slate-500 font-mono text-sm font-medium">{emp.phone || "-"}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className={`rounded-md px-3 py-1 font-bold capitalize ${emp.status === 'active' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                      {emp.status === 'active' ? 'Aktif' : 'Nonaktif'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button variant="ghost" size="icon" className="h-9 w-9 text-slate-400 hover:text-primary hover:bg-primary/10 rounded-md">
-                        <Edit2 className="w-5 h-5" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => handleDelete(emp.id)}
-                        className="h-9 w-9 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </motion.tr>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
+      {/* MODAL FORM */}
       <Modal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
-        title="Tambah Karyawan Baru"
+        title={editingId ? "Edit Data Personel" : "Registrasi Personel Baru"}
       >
-        <div className="space-y-5 py-4">
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase text-primary tracking-wider">Nama Lengkap</label>
+        <div className="space-y-4 py-2">
+          
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">Nama Lengkap</label>
             <Input 
-              placeholder="Masukkan nama..." 
-              className="rounded-md border-slate-300 focus-visible:ring-primary"
+              placeholder="Masukan nama lengkap..." 
+              className="rounded-sm border-slate-300 focus:ring-1 focus:ring-primary"
               value={formData.name}
               onChange={(e) => setFormData({...formData, name: e.target.value})}
             />
           </div>
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase text-primary tracking-wider">Posisi / Role</label>
-            <Input 
-              placeholder="Contoh: Barista" 
-              className="rounded-md border-slate-300 focus-visible:ring-primary"
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">Jabatan</label>
+            <select 
+              className="w-full p-2.5 rounded-sm border border-slate-300 text-sm focus:ring-1 focus:ring-primary outline-none bg-white"
               value={formData.role}
               onChange={(e) => setFormData({...formData, role: e.target.value})}
-            />
+            >
+              <option value="Manager Store">Manager Store</option>
+              <option value="Barista Senior">Barista Senior</option>
+              <option value="Barista Junior">Barista Junior</option>
+              <option value="Cashier">Cashier</option>
+              <option value="Kitchen Staff">Kitchen Staff</option>
+            </select>
           </div>
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase text-primary tracking-wider">Nomor HP</label>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">WhatsApp</label>
             <Input 
-              placeholder="Contoh: 0812..." 
-              className="rounded-md border-slate-300 focus-visible:ring-primary"
+              placeholder="08..." 
+              className="rounded-sm border-slate-300 focus:ring-1 focus:ring-primary"
               value={formData.phone}
               onChange={(e) => setFormData({...formData, phone: e.target.value})}
             />
           </div>
-          <div className="flex gap-3 pt-6">
-            <Button variant="outline" className="flex-1 font-bold border-slate-300 text-slate-600 hover:bg-slate-50 rounded-md" onClick={() => setIsModalOpen(false)}>Batal</Button>
-            <Button onClick={handleSubmit} className="flex-1 bg-primary hover:bg-primary/90 font-bold rounded-md">Simpan Data</Button>
+
+          <div className="space-y-1 pt-2">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wide flex items-center gap-1">
+                <KeyRound className="w-3 h-3 text-primary" /> PIN Keamanan
+            </label>
+            <div className="flex gap-2">
+                <Input 
+                placeholder="1234" 
+                maxLength={6}
+                className="font-mono text-center text-lg border-slate-300 bg-slate-50 rounded-sm focus:ring-1 focus:ring-primary"
+                value={formData.pin}
+                onChange={(e) => setFormData({...formData, pin: e.target.value})}
+                />
+                <div className="text-[10px] text-slate-500 leading-tight w-2/3 flex items-center">
+                    PIN ini digunakan untuk validasi tukar shift. Wajib unik.
+                </div>
+            </div>
           </div>
+
+          <div className="pt-6 flex gap-2">
+            <Button variant="outline" onClick={() => setIsModalOpen(false)} className="flex-1 rounded-sm border-slate-300 font-bold text-slate-600">
+                Batal
+            </Button>
+            <Button onClick={handleSave} disabled={isLoading} className="flex-1 bg-primary text-white font-bold rounded-sm shadow-sm hover:bg-primary/90">
+                {isLoading ? "Menyimpan..." : (editingId ? "Simpan Perubahan" : "Simpan Data")}
+            </Button>
+          </div>
+
         </div>
       </Modal>
     </div>
