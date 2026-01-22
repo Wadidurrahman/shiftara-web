@@ -13,6 +13,7 @@ interface Employee {
   id: string;
   name: string;
   role: string;
+  division: string;
   status: 'active' | 'inactive';
   pin?: string;
   phone?: string;
@@ -23,17 +24,16 @@ export default function EmployeesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   
-  // State untuk menyimpan daftar jabatan unik dari database
   const [existingRoles, setExistingRoles] = useState<string[]>([]);
+  const [existingDivisions, setExistingDivisions] = useState<string[]>([]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<Partial<Employee>>({
-    name: "", role: "", status: "active", pin: ""
+    name: "", role: "", division: "", status: "active", pin: ""
   });
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // 1. Fetch Data
   const fetchEmployees = async () => {
     setIsLoading(true);
     const { data, error } = await supabase
@@ -43,16 +43,11 @@ export default function EmployeesPage() {
       
     if (data) {
         setEmployees(data);
-        
-        // --- LOGIKA BARU: Ambil Jabatan Unik ---
-        // Kita ambil semua role yang ada, buang duplikat, lalu urutkan
         const roles = Array.from(new Set(data.map(item => item.role))).filter(Boolean).sort();
-        // Jika kosong (awal bikin aplikasi), kasih default dasar
-        if (roles.length === 0) {
-            setExistingRoles(["Manager", "Staff", "Admin"]);
-        } else {
-            setExistingRoles(roles);
-        }
+        setExistingRoles(roles.length > 0 ? roles : ["Manager", "Staff", "Admin"]);
+
+        const divisions = Array.from(new Set(data.map(item => item.division))).filter(Boolean).sort();
+        setExistingDivisions(divisions.length > 0 ? divisions : ["Umum", "Operasional"]);
     }
     
     if (error) console.error("Error fetching employees:", error);
@@ -68,8 +63,11 @@ export default function EmployeesPage() {
     setIsSubmitting(true);
 
     try {
-      // Pastikan role tidak kosong, kalau kosong default ke 'Staff'
-      const payload = { ...formData, role: formData.role || "Staff" };
+      const payload = { 
+          ...formData, 
+          role: formData.role || "Staff",
+          division: formData.division || "Umum"
+      };
 
       if (editingId) {
         await supabase.from("employees").update(payload).eq("id", editingId);
@@ -93,7 +91,7 @@ export default function EmployeesPage() {
   };
 
   const resetForm = () => {
-    setFormData({ name: "", role: "", status: "active", pin: "" });
+    setFormData({ name: "", role: "", division: "", status: "active", pin: "" });
     setEditingId(null);
   };
 
@@ -138,6 +136,7 @@ export default function EmployeesPage() {
           <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
             <tr>
               <th className="px-6 py-4 font-semibold">Nama Karyawan</th>
+              <th className="px-6 py-4 font-semibold">Divisi</th>
               <th className="px-6 py-4 font-semibold">Jabatan (Role)</th>
               <th className="px-6 py-4 font-semibold">Status</th>
               <th className="px-6 py-4 font-semibold">PIN</th>
@@ -146,9 +145,9 @@ export default function EmployeesPage() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {isLoading ? (
-              <tr><td colSpan={5} className="text-center p-8">Memuat data...</td></tr>
+              <tr><td colSpan={6} className="text-center p-8">Memuat data...</td></tr>
             ) : filteredEmployees.length === 0 ? (
-              <tr><td colSpan={5} className="text-center p-8 text-slate-400">Tidak ada data karyawan.</td></tr>
+              <tr><td colSpan={6} className="text-center p-8 text-slate-400">Tidak ada data karyawan.</td></tr>
             ) : (
               filteredEmployees.map((emp) => (
                 <tr key={emp.id} className="hover:bg-slate-50/50 transition-colors">
@@ -157,6 +156,9 @@ export default function EmployeesPage() {
                       <User className="w-4 h-4" />
                     </div>
                     {emp.name}
+                  </td>
+                  <td className="px-6 py-4 text-slate-600">
+                     {emp.division || "-"}
                   </td>
                   <td className="px-6 py-4">
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
@@ -209,25 +211,37 @@ export default function EmployeesPage() {
           </div>
           
           <div className="grid grid-cols-2 gap-4">
-            {/* --- BAGIAN YANG DIUBAH --- */}
+             <div className="space-y-2">
+                <label className="text-sm font-medium">Divisi</label>
+                <Input 
+                    list="divisions-list" 
+                    required
+                    placeholder="Pilih atau ketik..."
+                    value={formData.division}
+                    onChange={e => setFormData({...formData, division: e.target.value})}
+                />
+                <datalist id="divisions-list">
+                    {existingDivisions.map((div) => (
+                        <option key={div} value={div} />
+                    ))}
+                </datalist>
+            </div>
+
             <div className="space-y-2">
               <label className="text-sm font-medium">Jabatan</label>
-              {/* Input List untuk Autocomplete + Custom typing */}
               <Input 
                 list="roles-list" 
                 required
-                placeholder="Pilih atau ketik baru..."
+                placeholder="Pilih atau ketik..."
                 value={formData.role}
                 onChange={e => setFormData({...formData, role: e.target.value})}
               />
-              {/* Datalist tidak terlihat, tapi muncul saat mengetik */}
               <datalist id="roles-list">
                  {existingRoles.map((role) => (
                     <option key={role} value={role} />
                  ))}
               </datalist>
             </div>
-            {/* ------------------------- */}
             
             <div className="space-y-2">
               <label className="text-sm font-medium">Status</label>

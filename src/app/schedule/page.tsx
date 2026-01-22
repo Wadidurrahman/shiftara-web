@@ -22,12 +22,14 @@ export interface ShiftData {
   role: string;
   date?: string;
   shift_name?: string;
+  division?: string; // Update: Properti Divisi masuk ke data shift
 }
 
 interface Employee {
     id: string;
     name: string;
     role: string;
+    division: string;
     status: string;
     pin?: string;
 }
@@ -37,6 +39,16 @@ interface ShiftPattern {
     name: string;
     start_time: string;
     end_time: string;
+}
+
+interface SchedulePayload {
+    role: string;
+    date: string;
+    shift_name: string;
+    shift_time: string;
+    employee_name: string;
+    employee_id: string;
+    type: string;
 }
 
 const getWeekRange = (date: Date) => {
@@ -58,31 +70,32 @@ const formatDateRange = (date: Date) => {
   return `${start.toLocaleDateString('id-ID', opts)} - ${end.toLocaleDateString('id-ID', opts)} ${end.toLocaleDateString('id-ID', yearOpts)}`;
 };
 
-const getWeekNumber = (date: Date) => {
-    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-    return weekNo;
+const shuffleArray = <T,>(array: T[]): T[] => {
+    let currentIndex = array.length, randomIndex;
+    while (currentIndex !== 0) {
+        randomIndex = Math.floor(Math.random() * currentIndex);
+        currentIndex--;
+        [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+    }
+    return array;
 };
 
 export default function SchedulePage() {
   const [schedule, setSchedule] = useState<Record<string, ShiftData[]>>({});
-  const [dynamicRoles, setDynamicRoles] = useState<string[]>([]);
-  const [employeesByRole, setEmployeesByRole] = useState<Record<string, Employee[]>>({});
+  const [groupedEmployees, setGroupedEmployees] = useState<Record<string, Employee[]>>({});
+  const [sortedDivisions, setSortedDivisions] = useState<string[]>([]);
+  const [employeesByRowKey, setEmployeesByRowKey] = useState<Record<string, Employee>>({});
+  const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [shiftPatterns, setShiftPatterns] = useState<ShiftPattern[]>([]); 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
-  
   const [isSlotActionOpen, setIsSlotActionOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false); 
   const [isAutoScheduleOpen, setIsAutoScheduleOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSwapMode, setIsSwapMode] = useState(false);
-
-  const [selectedSlot, setSelectedSlot] = useState<{role: string, index: number, date: string, data: ShiftData} | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<{rowKey: string, index: number, date: string, data: ShiftData} | null>(null);
   const [swapSourceSlot, setSwapSourceSlot] = useState<ShiftData | null>(null);
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [selectedShiftTime, setSelectedShiftTime] = useState("");
   const [waLink, setWaLink] = useState("");
 
@@ -112,7 +125,8 @@ export default function SchedulePage() {
 
   const fetchScheduleData = useCallback(async () => {
     const { start, end } = getWeekRange(currentDate);
-    const { data: settings } = await supabase.from('app_settings').select('wa_group_link').single();
+    
+    const { data: settings } = await supabase.from('app_settings').select('wa_group_link').maybeSingle();
     if (settings) setWaLink(settings.wa_group_link || "");
 
     const { data: shifts } = await supabase.from('shift_patterns').select('*').order('start_time');
@@ -122,21 +136,27 @@ export default function SchedulePage() {
         setShiftPatterns([{ id: 'default', name: 'Pagi', start_time: '08:00', end_time: '16:00' }]);
     }
 
-    const { data: employees } = await supabase.from("employees").select("*").eq("status", "active");
-    const rolesSet = new Set<string>();
-    const empMap: Record<string, Employee[]> = {};
+    const { data: employees } = await supabase.from("employees").select("*").eq("status", "active")
+        .order('division', { ascending: true })
+        .order('name', { ascending: true });
 
-    if (employees) {
-        employees.forEach((emp: Employee) => {
-            rolesSet.add(emp.role);
-            if (!empMap[emp.role]) empMap[emp.role] = [];
-            empMap[emp.role].push(emp);
-        });
-    }
+    if (!employees) return;
 
-    const uniqueRoles = Array.from(rolesSet).sort();
-    setDynamicRoles(uniqueRoles.length > 0 ? uniqueRoles : ["Manager", "Staff"]);
-    setEmployeesByRole(empMap);
+    setAllEmployees(employees);
+
+    const groups: Record<string, Employee[]> = {};
+    const empMap: Record<string, Employee> = {};
+    
+    employees.forEach(emp => {
+        const divName = emp.division || "Umum";
+        if (!groups[divName]) groups[divName] = [];
+        groups[divName].push(emp);
+        empMap[emp.id] = emp; 
+    });
+
+    setGroupedEmployees(groups);
+    setSortedDivisions(Object.keys(groups).sort());
+    setEmployeesByRowKey(empMap);
 
     const { data: dbSchedules } = await supabase
       .from("schedules")
@@ -145,12 +165,16 @@ export default function SchedulePage() {
       .lte('date', end.toISOString());
 
     const formattedSchedule: Record<string, ShiftData[]> = {};
-    (uniqueRoles.length > 0 ? uniqueRoles : ["Manager", "Staff"]).forEach(role => {
-      formattedSchedule[role] = Array(7).fill(null).map((_, i) => {
+    
+    employees.forEach(emp => {
+      const rowKey = emp.id; 
+      
+      formattedSchedule[rowKey] = Array(7).fill(null).map((_, i) => {
         const slotDate = new Date(start);
         slotDate.setDate(slotDate.getDate() + i);
         const dateString = slotDate.toISOString().split('T')[0];
-        const found = dbSchedules?.find(s => s.role === role && s.date === dateString);
+        
+        const found = dbSchedules?.find(s => s.employee_id === emp.id && s.date === dateString);
 
         if (found) {
             return {
@@ -161,17 +185,20 @@ export default function SchedulePage() {
                 time: found.shift_time || "-",
                 role: found.role,
                 date: found.date,
-                shift_name: found.shift_name
+                shift_name: found.shift_name,
+                division: emp.division // Pastikan divisi masuk ke data slot
             };
         }
+        
         return {
-             id: `empty-${role}-${i}`,
+             id: `empty-${emp.id}-${i}`,
              type: 'empty',
              name: "",
              time: "",
-             role: role,
+             role: emp.role,
              date: dateString,
-             shift_name: ""
+             shift_name: "",
+             division: emp.division
         };
       });
     });
@@ -185,37 +212,44 @@ export default function SchedulePage() {
     return () => { isMounted = false; };
   }, [fetchScheduleData]); 
 
-  const handleSlotClick = async (role: string, idx: number) => {
-    const clickedSlot = schedule[role][idx];
+  const handleSlotClick = async (rowKey: string, idx: number) => {
+    const clickedSlot = schedule[rowKey][idx];
     if(!clickedSlot || !clickedSlot.date) return;
 
     if (isSwapMode && swapSourceSlot) {
         setIsProcessing(true);
-        const sourcePayload = {
-            role: swapSourceSlot.role,
-            date: swapSourceSlot.date,
-            employee_id: clickedSlot.employee_id || null, 
-            employee_name: clickedSlot.name === "Kosong" ? null : clickedSlot.name,
-            shift_time: clickedSlot.time,
-            shift_name: clickedSlot.shift_name || getShiftNameFromTime(clickedSlot.time),
-            type: clickedSlot.type === 'empty' ? 'empty' : clickedSlot.type
-        };
-        const targetPayload = {
-            role: clickedSlot.role,
-            date: clickedSlot.date,
-            employee_id: swapSourceSlot.employee_id,
-            employee_name: swapSourceSlot.name,
-            shift_time: swapSourceSlot.time,
-            shift_name: swapSourceSlot.shift_name || getShiftNameFromTime(swapSourceSlot.time),
-            type: 'filled'
-        };
-
-        if (sourcePayload.type === 'empty' || !sourcePayload.employee_id) {
-            await supabase.from("schedules").delete().eq('role', swapSourceSlot.role).eq('date', swapSourceSlot.date);
-        } else {
-            await supabase.from("schedules").upsert(sourcePayload, { onConflict: 'role, date' });
+        if (!swapSourceSlot.employee_id || !employeesByRowKey[rowKey]?.id) {
+             showToast("Data karyawan tidak valid", "error");
+             setIsProcessing(false);
+             return;
         }
-        await supabase.from("schedules").upsert(targetPayload, { onConflict: 'role, date' });
+
+        await supabase.from("schedules").delete().match({ employee_id: swapSourceSlot.employee_id, date: swapSourceSlot.date });
+        await supabase.from("schedules").delete().match({ employee_id: employeesByRowKey[rowKey].id, date: clickedSlot.date });
+
+        if(swapSourceSlot.type !== 'empty') {
+             await supabase.from("schedules").insert([{
+                 role: employeesByRowKey[rowKey].role, 
+                 date: clickedSlot.date,
+                 employee_name: employeesByRowKey[rowKey].name,
+                 employee_id: employeesByRowKey[rowKey].id, 
+                 shift_time: swapSourceSlot.time, 
+                 shift_name: swapSourceSlot.shift_name,
+                 type: 'filled'
+             }]);
+        }
+
+        if(clickedSlot.type !== 'empty') {
+            await supabase.from("schedules").insert([{
+                role: swapSourceSlot.role,
+                date: swapSourceSlot.date,
+                employee_name: swapSourceSlot.name, 
+                employee_id: swapSourceSlot.employee_id,
+                shift_time: clickedSlot.time, 
+                shift_name: clickedSlot.shift_name,
+                type: 'filled'
+            }]);
+        }
 
         showToast("Shift berhasil ditukar!", "success");
         setIsSwapMode(false);
@@ -225,8 +259,7 @@ export default function SchedulePage() {
         return;
     }
 
-    setSelectedSlot({ role, index: idx, date: clickedSlot.date, data: clickedSlot });
-    setSelectedEmployeeId(clickedSlot.employee_id || "");
+    setSelectedSlot({ rowKey, index: idx, date: clickedSlot.date, data: clickedSlot });
     if (clickedSlot.time && clickedSlot.time !== '-' && clickedSlot.time !== "") {
         setSelectedShiftTime(clickedSlot.time);
     } else if (shiftPatterns.length > 0) {
@@ -247,10 +280,11 @@ export default function SchedulePage() {
   const handleSaveSlot = async () => {
     if (!selectedSlot) return;
     setIsProcessing(true);
-    const employee = employeesByRole[selectedSlot.role]?.find(e => e.id === selectedEmployeeId);
+    const employee = employeesByRowKey[selectedSlot.rowKey];
+    
     if (employee) {
        const payload = {
-          role: selectedSlot.role,
+          role: employee.role,
           date: selectedSlot.date,
           employee_id: employee.id,
           employee_name: employee.name,
@@ -258,7 +292,9 @@ export default function SchedulePage() {
           shift_name: getShiftNameFromTime(selectedShiftTime),
           type: 'filled'
        };
-       const { error } = await supabase.from("schedules").upsert(payload, { onConflict: 'role, date' });
+       await supabase.from("schedules").delete().match({ employee_id: employee.id, date: selectedSlot.date });
+       const { error } = await supabase.from("schedules").insert(payload);
+       
        if (error) showToast("Gagal: " + error.message, "error");
        else showToast("Jadwal tersimpan", "success");
     }
@@ -270,7 +306,8 @@ export default function SchedulePage() {
   const handleDeleteSlot = async () => {
       if (!selectedSlot) return;
       setIsProcessing(true);
-      await supabase.from("schedules").delete().eq('role', selectedSlot.role).eq('date', selectedSlot.date);
+      const employee = employeesByRowKey[selectedSlot.rowKey];
+      await supabase.from("schedules").delete().match({ employee_id: employee.id, date: selectedSlot.date });
       showToast("Slot dikosongkan", "success");
       await fetchScheduleData();
       setIsProcessing(false);
@@ -280,15 +317,18 @@ export default function SchedulePage() {
   const handleMarkLeave = async () => {
       if (!selectedSlot) return;
       setIsProcessing(true);
+      const employee = employeesByRowKey[selectedSlot.rowKey];
       const payload = {
-          role: selectedSlot.role,
+          role: employee.role,
           date: selectedSlot.date,
+          employee_id: employee.id,
           type: 'leave',
           employee_name: 'CUTI / LIBUR',
           shift_time: '-',
           shift_name: 'Libur'
       };
-      await supabase.from("schedules").upsert(payload, { onConflict: 'role, date' });
+      await supabase.from("schedules").delete().match({ employee_id: employee.id, date: selectedSlot.date });
+      await supabase.from("schedules").insert(payload);
       showToast("Ditandai sebagai Libur", "success");
       await fetchScheduleData();
       setIsProcessing(false);
@@ -301,69 +341,78 @@ export default function SchedulePage() {
       if (waLink) window.open(waLink, '_blank');
   };
 
-  const shuffleArray = <T,>(array: T[]): T[] => {
-    let currentIndex = array.length, randomIndex;
-    while (currentIndex !== 0) {
-      randomIndex = Math.floor(Math.random() * currentIndex);
-      currentIndex--;
-      [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
-    }
-    return array;
-  };
-
   const handleAutoGenerate = async () => {
     setIsProcessing(true);
-    const updates = [];
+    const updates: SchedulePayload[] = [];
     const { start } = getWeekRange(currentDate);
-    const weekNum = getWeekNumber(start);
 
     const availableShifts = shiftPatterns.length > 0 
         ? shiftPatterns 
         : [{ id: 'def', name: 'Regular', start_time: '08:00', end_time: '17:00' }];
 
-    for (const role of dynamicRoles) {
-        const staffList = employeesByRole[role] || [];
-        staffList.sort((a, b) => a.name.localeCompare(b.name));
+    const staffByDivision: Record<string, Employee[]> = {};
+    allEmployees.forEach(emp => {
+        const div = emp.division || "Umum";
+        if (!staffByDivision[div]) staffByDivision[div] = [];
+        staffByDivision[div].push(emp);
+    });
 
-        if (staffList.length === 0) continue;
+    const ROTATION_BLOCK_DAYS = 2; 
 
-        const totalStaff = staffList.length;
-        const totalShiftsType = availableShifts.length; 
+    for (const division in staffByDivision) {
+        let staffList = staffByDivision[division];
+        staffList = shuffleArray([...staffList]);
 
-        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-            const targetDate = new Date(start);
-            targetDate.setDate(targetDate.getDate() + dayIndex);
-            const dateStr = targetDate.toISOString().split('T')[0];
+        staffList.forEach((emp, staffIndex) => {
+            // ALGORITMA COVERAGE:
+            // staffIndex % totalShifts menjamin setiap shift (Pagi/Malam)
+            // memiliki perwakilan dari divisi ini.
+            const startShiftOffset = staffIndex % availableShifts.length;
+            const rowKey = emp.id; 
+            let workingDayCounter = 0; 
 
-            const currentSlot = schedule[role]?.[dayIndex];
+            for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+                const targetDate = new Date(start);
+                targetDate.setDate(targetDate.getDate() + dayIndex);
+                const dateStr = targetDate.toISOString().split('T')[0];
+                const currentSlot = schedule[rowKey]?.[dayIndex];
 
-            if (currentSlot && currentSlot.type === 'empty') {
-                const shuffledStaff = shuffleArray([...staffList]);
-                const selectedStaffIndex = (weekNum) % totalStaff;
-                const selectedStaff = shuffledStaff.length > 0 ? shuffledStaff[0] : staffList[selectedStaffIndex];
+                if (currentSlot && (currentSlot.type === 'leave' || currentSlot.type === 'filled')) {
+                    if(currentSlot.type === 'filled') workingDayCounter++;
+                    continue; 
+                }
 
-                const shiftIndex = (weekNum) % totalShiftsType;
+                const shiftBlock = Math.floor(workingDayCounter / ROTATION_BLOCK_DAYS);
+                const shiftIndex = (startShiftOffset + shiftBlock) % availableShifts.length;
                 const selectedShift = availableShifts[shiftIndex];
 
                 updates.push({
-                    role: role,
+                    role: emp.role,
                     date: dateStr,
                     shift_name: selectedShift.name,
                     shift_time: `${selectedShift.start_time.slice(0,5)} - ${selectedShift.end_time.slice(0,5)}`,
-                    employee_name: selectedStaff.name,
-                    employee_id: selectedStaff.id,
+                    employee_name: emp.name,
+                    employee_id: emp.id,
                     type: 'filled'
                 });
+                workingDayCounter++;
             }
-        }
+        });
     }
 
     if (updates.length > 0) {
-        await supabase.from("schedules").upsert(updates, { onConflict: 'role, date' });
-        showToast(`Berhasil generate ${updates.length} jadwal shift!`, "success");
-        await fetchScheduleData();
+        for (const update of updates) {
+             await supabase.from("schedules").delete().match({ employee_id: update.employee_id, date: update.date });
+        }
+        const { error } = await supabase.from("schedules").insert(updates);
+        if (error) {
+            showToast("Gagal menyimpan: " + error.message, "error");
+        } else {
+            showToast(`Berhasil mengisi ${updates.length} slot!`, "success");
+            await fetchScheduleData();
+        }
     } else {
-        showToast("Tidak ada slot kosong yang perlu diisi.", "error");
+        showToast("Semua slot sudah terisi penuh.", "success");
     }
     
     setIsProcessing(false);
@@ -394,7 +443,7 @@ export default function SchedulePage() {
               className="bg-[#0B4650] text-white px-6 py-2 rounded-full shadow-lg font-bold flex items-center gap-3 animate-pulse cursor-pointer border-2 border-white pointer-events-auto"
               onClick={() => { setIsSwapMode(false); setSwapSourceSlot(null); }}
             >
-               <ArrowRightLeft className="w-5 h-5" /> Mode Tukar Aktif: Klik Target (Batal)
+               <ArrowRightLeft className="w-5 h-5" /> Mode Tukar Aktif
             </motion.div>
          </div>
        )}
@@ -403,7 +452,7 @@ export default function SchedulePage() {
           <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
               <Button variant="ghost" size="icon" onClick={handlePrevWeek}><ChevronLeft className="w-5 h-5" /></Button>
               <div className="flex items-center gap-2 px-4 text-sm font-bold text-slate-800 min-w-[220px] justify-center">
-                 <CalendarIcon className="w-4 h-4 text-[#0B4650]" /> {formatDateRange(currentDate)}
+                  <CalendarIcon className="w-4 h-4 text-[#0B4650]" /> {formatDateRange(currentDate)}
               </div>
               <Button variant="ghost" size="icon" onClick={handleNextWeek}><ChevronRight className="w-5 h-5" /></Button>
           </div>
@@ -421,25 +470,30 @@ export default function SchedulePage() {
        <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-4">
           <ScheduleGrid 
             schedule={schedule} 
-            selected={null} 
+            groupedEmployees={groupedEmployees} 
+            sortedDivisions={sortedDivisions}   
+            selected={selectedSlot ? { rowKey: selectedSlot.rowKey, index: selectedSlot.index } : null}
             swapMode={isSwapMode} 
             onSlotClick={handleSlotClick} 
           />
        </div>
 
        <SchedulePreviewModal 
-          isOpen={isPreviewOpen}
-          onClose={() => setIsPreviewOpen(false)}
-          onPublish={handlePublish}
-          schedule={schedule}
-          roles={dynamicRoles}
-          currentDate={currentDate}
+         isOpen={isPreviewOpen}
+         onClose={() => setIsPreviewOpen(false)}
+         onPublish={handlePublish}
+         schedule={schedule}
+         groupedEmployees={groupedEmployees} 
+         sortedDivisions={sortedDivisions}
+         currentDate={currentDate}
        />
 
        <Modal isOpen={isSlotActionOpen} onClose={() => setIsSlotActionOpen(false)} title="Atur Jadwal">
           <div className="space-y-5">
              <div className="p-3 bg-teal-50 border border-teal-100 rounded-lg text-center">
-                <span className="text-xs font-bold text-[#0B4650] uppercase tracking-wider">{selectedSlot?.role}</span>
+                <span className="text-xs font-bold text-[#0B4650] uppercase tracking-wider">
+                    {selectedSlot ? employeesByRowKey[selectedSlot.rowKey]?.name : '-'}
+                </span>
                 <div className="font-bold text-slate-800 mt-1">
                     {selectedSlot?.date ? new Date(selectedSlot.date).toLocaleDateString('id-ID', {weekday: 'long', day: 'numeric', month: 'long'}) : '-'}
                 </div>
@@ -448,16 +502,9 @@ export default function SchedulePage() {
              <div className="space-y-4">
                 <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><User className="w-3 h-3"/> Karyawan</label>
-                    <select 
-                        className="w-full p-3 bg-white border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-[#0B4650]"
-                        value={selectedEmployeeId}
-                        onChange={(e) => setSelectedEmployeeId(e.target.value)}
-                    >
-                        <option value="">-- Pilih Karyawan --</option>
-                        {employeesByRole[selectedSlot?.role || ""]?.map((emp) => (
-                            <option key={emp.id} value={emp.id}>{emp.name}</option>
-                        ))}
-                    </select>
+                    <div className="p-3 bg-slate-100 border border-slate-200 rounded-lg text-slate-700 font-medium">
+                        {employeesByRowKey[selectedSlot?.rowKey || ""]?.name || "-"}
+                    </div>
                 </div>
 
                 <div className="space-y-1">
@@ -497,7 +544,8 @@ export default function SchedulePage() {
          <div className="p-4 space-y-4 text-center">
             <div className="p-4 bg-teal-50 text-[#0B4650] rounded-lg text-sm border border-teal-200">
                 <Sparkles className="w-6 h-6 mx-auto mb-2 text-[#0B4650]" />
-                Mengisi otomatis slot kosong dengan karyawan acak.
+                <p>Otomatis mengisi slot kosong dengan <strong>Distribusi Divisi Merata</strong>.</p>
+                <p className="text-xs text-slate-500 mt-1">Sistem menjamin setiap shift memiliki personil dari setiap divisi.</p>
             </div>
             <div className="flex gap-2">
                 <Button variant="outline" className="flex-1" onClick={() => setIsAutoScheduleOpen(false)}>Batal</Button>

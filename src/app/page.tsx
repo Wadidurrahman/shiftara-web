@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card} from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Users, AlertCircle, Clock, CheckCircle2, ArrowRight, CalendarDays, RefreshCcw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { motion } from "framer-motion";
@@ -48,16 +48,18 @@ export default function DashboardPage() {
   const [todayRoster, setTodayRoster] = useState<ShiftItem[]>([]);
   const [tomorrowRoster, setTomorrowRoster] = useState<ShiftItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-
-  const todayDate = new Date();
-  const yesterdayDate = subDays(todayDate, 1);
-  const tomorrowDate = addDays(todayDate, 1);
+  const [dateInfo, setDateInfo] = useState({ today: new Date(), yesterday: new Date(), tomorrow: new Date() });
 
   useEffect(() => {
     async function fetchOperationalData() {
       try {
         setIsLoading(true);
+        const todayDate = new Date();
+        const yesterdayDate = subDays(todayDate, 1);
+        const tomorrowDate = addDays(todayDate, 1);
         
+        setDateInfo({ today: todayDate, yesterday: yesterdayDate, tomorrow: tomorrowDate });
+
         const todayStr = format(todayDate, 'yyyy-MM-dd');
         const yesterdayStr = format(yesterdayDate, 'yyyy-MM-dd');
         const tomorrowStr = format(tomorrowDate, 'yyyy-MM-dd');
@@ -80,25 +82,25 @@ export default function DashboardPage() {
                     time: s.shift_time || "-",
                     status: s.type
                 }))
-                .sort((a) => (a.status === 'empty' ? -1 : 1));
+                .sort((a, b) => {
+                   if (a.status === 'empty' && b.status !== 'empty') return -1;
+                   if (a.status !== 'empty' && b.status === 'empty') return 1;
+                   return 0;
+                });
         };
 
-        const yRoster = processRoster(yesterdayStr);
-        const tRoster = processRoster(todayStr);
-        const tomRoster = processRoster(tomorrowStr);
-
-        setYesterdayRoster(yRoster);
-        setTodayRoster(tRoster);
-        setTomorrowRoster(tomRoster);
+        setYesterdayRoster(processRoster(yesterdayStr));
+        setTodayRoster(processRoster(todayStr));
+        setTomorrowRoster(processRoster(tomorrowStr));
 
         setMetrics({
-          onDutyToday: tRoster.filter(s => s.status === 'filled').length,
+          onDutyToday: processRoster(todayStr).filter(s => s.status === 'filled').length,
           emptyShifts: emptyTotalRes.count || 0,
           pendingRequests: pendingRes.count || 0,
         });
 
       } catch (error) {
-        console.error("Error fetching dashboard:", error);
+        console.error(error);
       } finally {
         setIsLoading(false);
       }
@@ -192,7 +194,7 @@ export default function DashboardPage() {
                         <div className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                             <RefreshCcw className="w-3 h-3" /> Kemarin
                         </div>
-                        <div className="text-[10px] font-mono text-slate-400">{format(yesterdayDate, 'dd MMM', { locale: id })}</div>
+                        <div className="text-[10px] font-mono text-slate-400">{format(dateInfo.yesterday, 'dd MMM', { locale: id })}</div>
                     </div>
                 </div>
                 <div className="p-3 flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -210,7 +212,7 @@ export default function DashboardPage() {
                             <CheckCircle2 className="w-4 h-4 text-[#F58634]" /> HARI INI
                         </div>
                         <div className="text-xs font-bold bg-[#083a42] px-2 py-0.5 rounded text-[#F58634] shadow-sm">
-                            {format(todayDate, 'dd MMM', { locale: id })}
+                            {format(dateInfo.today, 'dd MMM', { locale: id })}
                         </div>
                     </div>
                 </div>
@@ -236,7 +238,7 @@ export default function DashboardPage() {
                         <div className="text-xs font-bold text-blue-600 uppercase tracking-widest flex items-center gap-2">
                             <CalendarDays className="w-3 h-3" /> Besok
                         </div>
-                        <div className="text-[10px] font-mono text-blue-400">{format(tomorrowDate, 'dd MMM', { locale: id })}</div>
+                        <div className="text-[10px] font-mono text-blue-400">{format(dateInfo.tomorrow, 'dd MMM', { locale: id })}</div>
                     </div>
                 </div>
                 <div className="p-3 flex-1 flex flex-col min-h-0 overflow-hidden">
