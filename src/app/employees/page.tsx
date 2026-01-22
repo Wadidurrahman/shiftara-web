@@ -1,524 +1,266 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { 
-  ChevronLeft, ChevronRight, Sparkles, User, Clock, 
-  CheckCircle2, AlertCircle, Trash2, CalendarOff, 
-  Send, X, ArrowRightLeft, Calendar as CalendarIcon
-} from "lucide-react"; 
+  UserPlus, Search, Edit, Trash2, User, Shield, KeyRound 
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import ScheduleGrid from "@/components/shiftara/ScheduleGrid";
-import SchedulePreviewModal from "@/components/shiftara/SchedulePreviewModal"; 
-import Modal from "@/components/ui/Modal";
+import { Input } from "@/components/ui/input";
 import { supabase } from "@/lib/supabase";
-import { motion, AnimatePresence } from "framer-motion";
-
-export interface ShiftData {
-  id: string;
-  type: 'filled' | 'leave' | 'empty';
-  name?: string;
-  employee_id?: string;
-  time: string;
-  role: string;
-  date?: string;
-  shift_name?: string;
-}
+import Modal from "@/components/ui/Modal"; 
 
 interface Employee {
-    id: string;
-    name: string;
-    role: string;
-    status: string;
-    pin?: string;
+  id: string;
+  name: string;
+  role: string;
+  status: 'active' | 'inactive';
+  pin?: string;
+  phone?: string;
 }
 
-interface ShiftPattern {
-    id: string;
-    name: string;
-    start_time: string;
-    end_time: string;
-}
-
-const getWeekRange = (date: Date) => {
-  const start = new Date(date);
-  const day = start.getDay(); 
-  const diff = start.getDate() - day + (day === 0 ? -6 : 1); 
-  start.setDate(diff);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6); 
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
-};
-
-const formatDateRange = (date: Date) => {
-  const { start, end } = getWeekRange(date);
-  const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
-  const yearOpts: Intl.DateTimeFormatOptions = { year: 'numeric' };
-  return `${start.toLocaleDateString('id-ID', opts)} - ${end.toLocaleDateString('id-ID', opts)} ${end.toLocaleDateString('id-ID', yearOpts)}`;
-};
-
-const getWeekNumber = (date: Date) => {
-    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-    return weekNo;
-};
-
-export default function SchedulePage() {
-  const [schedule, setSchedule] = useState<Record<string, ShiftData[]>>({});
-  const [dynamicRoles, setDynamicRoles] = useState<string[]>([]);
-  const [employeesByRole, setEmployeesByRole] = useState<Record<string, Employee[]>>({});
-  const [shiftPatterns, setShiftPatterns] = useState<ShiftPattern[]>([]); 
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+export default function EmployeesPage() {
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
   
-  const [isSlotActionOpen, setIsSlotActionOpen] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false); 
-  const [isAutoScheduleOpen, setIsAutoScheduleOpen] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isSwapMode, setIsSwapMode] = useState(false);
+  // State untuk menyimpan daftar jabatan unik dari database
+  const [existingRoles, setExistingRoles] = useState<string[]>([]);
 
-  const [selectedSlot, setSelectedSlot] = useState<{role: string, index: number, date: string, data: ShiftData} | null>(null);
-  const [swapSourceSlot, setSwapSourceSlot] = useState<ShiftData | null>(null);
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
-  const [selectedShiftTime, setSelectedShiftTime] = useState("");
-  const [waLink, setWaLink] = useState("");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formData, setFormData] = useState<Partial<Employee>>({
+    name: "", role: "", status: "active", pin: ""
+  });
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  const showToast = (message: string, type: 'success' | 'error') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  const handlePrevWeek = () => {
-    const newDate = new Date(currentDate);
-    newDate.setDate(newDate.getDate() - 7);
-    setCurrentDate(newDate);
-  };
-
-  const handleNextWeek = () => {
-    const newDate = new Date(currentDate);
-    newDate.setDate(newDate.getDate() + 7);
-    setCurrentDate(newDate);
-  };
-
-  const getShiftNameFromTime = useCallback((timeRange: string) => {
-      if (!timeRange) return "Shift";
-      const startTimeToCheck = timeRange.split(' - ')[0]; 
-      const found = shiftPatterns.find(p => p.start_time.startsWith(startTimeToCheck));
-      return found ? found.name : "Shift";
-  }, [shiftPatterns]);
-
-  const fetchScheduleData = useCallback(async () => {
-    const { start, end } = getWeekRange(currentDate);
-    
-    // FIX: Gunakan maybeSingle() agar tidak error 406 jika data kosong
-    const { data: settings } = await supabase.from('app_settings').select('wa_group_link').maybeSingle();
-    if (settings) setWaLink(settings.wa_group_link || "");
-
-    const { data: shifts } = await supabase.from('shift_patterns').select('*').order('start_time');
-    if (shifts && shifts.length > 0) {
-        setShiftPatterns(shifts);
-    } else {
-        // Fallback default jika tabel shift_patterns kosong
-        setShiftPatterns([{ id: 'def', name: 'Regular', start_time: '08:00', end_time: '17:00' }]);
-    }
-
-    const { data: employees } = await supabase.from("employees").select("*").eq("status", "active");
-    const rolesSet = new Set<string>();
-    const empMap: Record<string, Employee[]> = {};
-
-    if (employees) {
-        employees.forEach((emp: Employee) => {
-            rolesSet.add(emp.role);
-            if (!empMap[emp.role]) empMap[emp.role] = [];
-            empMap[emp.role].push(emp);
-        });
-    }
-
-    const uniqueRoles = Array.from(rolesSet).sort();
-    setDynamicRoles(uniqueRoles.length > 0 ? uniqueRoles : ["Manager", "Staff"]);
-    setEmployeesByRole(empMap);
-
-    const { data: dbSchedules } = await supabase
-      .from("schedules")
+  // 1. Fetch Data
+  const fetchEmployees = async () => {
+    setIsLoading(true);
+    const { data, error } = await supabase
+      .from("employees")
       .select("*")
-      .gte('date', start.toISOString())
-      .lte('date', end.toISOString());
-
-    const formattedSchedule: Record<string, ShiftData[]> = {};
-    (uniqueRoles.length > 0 ? uniqueRoles : ["Manager", "Staff"]).forEach(role => {
-      formattedSchedule[role] = Array(7).fill(null).map((_, i) => {
-        const slotDate = new Date(start);
-        slotDate.setDate(slotDate.getDate() + i);
-        const dateString = slotDate.toISOString().split('T')[0];
-        const found = dbSchedules?.find(s => s.role === role && s.date === dateString);
-
-        if (found) {
-            return {
-                id: found.id,
-                type: (found.type === 'leave' ? 'leave' : 'filled') as 'filled' | 'leave',
-                name: found.type === 'leave' ? "CUTI / LIBUR" : (found.employee_name || "Terisi"),
-                employee_id: found.employee_id,
-                time: found.shift_time || "-",
-                role: found.role,
-                date: found.date,
-                shift_name: found.shift_name
-            };
+      .order("name", { ascending: true });
+      
+    if (data) {
+        setEmployees(data);
+        
+        // --- LOGIKA BARU: Ambil Jabatan Unik ---
+        // Kita ambil semua role yang ada, buang duplikat, lalu urutkan
+        const roles = Array.from(new Set(data.map(item => item.role))).filter(Boolean).sort();
+        // Jika kosong (awal bikin aplikasi), kasih default dasar
+        if (roles.length === 0) {
+            setExistingRoles(["Manager", "Staff", "Admin"]);
+        } else {
+            setExistingRoles(roles);
         }
-        return {
-             id: `empty-${role}-${i}`,
-             type: 'empty',
-             name: "",
-             time: "",
-             role: role,
-             date: dateString,
-             shift_name: ""
-        };
-      });
-    });
-    setSchedule(formattedSchedule);
-  }, [currentDate]); 
+    }
+    
+    if (error) console.error("Error fetching employees:", error);
+    setIsLoading(false);
+  };
 
   useEffect(() => {
-    let isMounted = true;
-    const run = async () => { if(isMounted) await fetchScheduleData(); };
-    run();
-    return () => { isMounted = false; };
-  }, [fetchScheduleData]); 
+    fetchEmployees();
+  }, []);
 
-  const handleSlotClick = async (role: string, idx: number) => {
-    const clickedSlot = schedule[role][idx];
-    if(!clickedSlot || !clickedSlot.date) return;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
 
-    if (isSwapMode && swapSourceSlot) {
-        setIsProcessing(true);
-        const sourcePayload = {
-            role: swapSourceSlot.role,
-            date: swapSourceSlot.date,
-            employee_id: clickedSlot.employee_id || null, 
-            employee_name: clickedSlot.name === "Kosong" ? null : clickedSlot.name,
-            shift_time: clickedSlot.time,
-            shift_name: clickedSlot.shift_name || getShiftNameFromTime(clickedSlot.time),
-            type: clickedSlot.type === 'empty' ? 'empty' : clickedSlot.type
-        };
-        const targetPayload = {
-            role: clickedSlot.role,
-            date: clickedSlot.date,
-            employee_id: swapSourceSlot.employee_id,
-            employee_name: swapSourceSlot.name,
-            shift_time: swapSourceSlot.time,
-            shift_name: swapSourceSlot.shift_name || getShiftNameFromTime(swapSourceSlot.time),
-            type: 'filled'
-        };
+    try {
+      // Pastikan role tidak kosong, kalau kosong default ke 'Staff'
+      const payload = { ...formData, role: formData.role || "Staff" };
 
-        if (sourcePayload.type === 'empty' || !sourcePayload.employee_id) {
-            await supabase.from("schedules").delete().eq('role', swapSourceSlot.role).eq('date', swapSourceSlot.date);
-        } else {
-            await supabase.from("schedules").upsert(sourcePayload, { onConflict: 'role, date' });
-        }
-        await supabase.from("schedules").upsert(targetPayload, { onConflict: 'role, date' });
-
-        showToast("Shift berhasil ditukar!", "success");
-        setIsSwapMode(false);
-        setSwapSourceSlot(null);
-        await fetchScheduleData();
-        setIsProcessing(false);
-        return;
+      if (editingId) {
+        await supabase.from("employees").update(payload).eq("id", editingId);
+      } else {
+        await supabase.from("employees").insert([payload]);
+      }
+      setIsModalOpen(false);
+      fetchEmployees(); 
+      resetForm();
+    } catch (error) {
+      console.error("Error saving employee:", error);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setSelectedSlot({ role, index: idx, date: clickedSlot.date, data: clickedSlot });
-    setSelectedEmployeeId(clickedSlot.employee_id || "");
-    if (clickedSlot.time && clickedSlot.time !== '-' && clickedSlot.time !== "") {
-        setSelectedShiftTime(clickedSlot.time);
-    } else if (shiftPatterns.length > 0) {
-        const first = shiftPatterns[0];
-        setSelectedShiftTime(`${first.start_time.slice(0,5)} - ${first.end_time.slice(0,5)}`);
-    }
-    setIsSlotActionOpen(true);
   };
 
-  const handleInitiateSwap = () => {
-      if(!selectedSlot) return;
-      setSwapSourceSlot(selectedSlot.data);
-      setIsSlotActionOpen(false);
-      setIsSwapMode(true);
-      showToast("Pilih slot target untuk ditukar", "success");
+  const handleDelete = async (id: string) => {
+    if (!confirm("Yakin ingin menghapus karyawan ini?")) return;
+    await supabase.from("employees").delete().eq("id", id);
+    fetchEmployees();
   };
 
-  const handleSaveSlot = async () => {
-    if (!selectedSlot) return;
-    setIsProcessing(true);
-    const employee = employeesByRole[selectedSlot.role]?.find(e => e.id === selectedEmployeeId);
-    if (employee) {
-       const payload = {
-          role: selectedSlot.role,
-          date: selectedSlot.date,
-          employee_id: employee.id,
-          employee_name: employee.name,
-          shift_time: selectedShiftTime,
-          shift_name: getShiftNameFromTime(selectedShiftTime),
-          type: 'filled'
-       };
-       const { error } = await supabase.from("schedules").upsert(payload, { onConflict: 'role, date' });
-       if (error) showToast("Gagal: " + error.message, "error");
-       else showToast("Jadwal tersimpan", "success");
-    }
-    await fetchScheduleData();
-    setIsProcessing(false);
-    setIsSlotActionOpen(false);
+  const resetForm = () => {
+    setFormData({ name: "", role: "", status: "active", pin: "" });
+    setEditingId(null);
   };
 
-  const handleDeleteSlot = async () => {
-      if (!selectedSlot) return;
-      setIsProcessing(true);
-      await supabase.from("schedules").delete().eq('role', selectedSlot.role).eq('date', selectedSlot.date);
-      showToast("Slot dikosongkan", "success");
-      await fetchScheduleData();
-      setIsProcessing(false);
-      setIsSlotActionOpen(false);
+  const handleEditClick = (emp: Employee) => {
+    setFormData(emp);
+    setEditingId(emp.id);
+    setIsModalOpen(true);
   };
 
-  const handleMarkLeave = async () => {
-      if (!selectedSlot) return;
-      setIsProcessing(true);
-      const payload = {
-          role: selectedSlot.role,
-          date: selectedSlot.date,
-          type: 'leave',
-          employee_name: 'CUTI / LIBUR',
-          shift_time: '-',
-          shift_name: 'Libur'
-      };
-      await supabase.from("schedules").upsert(payload, { onConflict: 'role, date' });
-      showToast("Ditandai sebagai Libur", "success");
-      await fetchScheduleData();
-      setIsProcessing(false);
-      setIsSlotActionOpen(false);
-  };
-
-  const handlePublish = () => {
-      showToast("Jadwal Terpublikasi!", "success");
-      setIsPreviewOpen(false);
-      if (waLink) window.open(waLink, '_blank');
-  };
-
-  const handleAutoGenerate = async () => {
-    setIsProcessing(true);
-    const updates: {
-        role: string;
-        date: string;
-        shift_name: string;
-        shift_time: string;
-        employee_name: string | undefined;
-        employee_id: string | undefined;
-        type: string;
-    }[] = [];
-    const { start } = getWeekRange(currentDate);
-    const weekNum = getWeekNumber(start);
-
-    // Ambil pola shift dari database
-    const availableShifts = shiftPatterns.length > 0 
-        ? shiftPatterns 
-        : [{ id: 'def', name: 'Regular', start_time: '08:00', end_time: '17:00' }];
-
-    // Loop setiap Role
-    dynamicRoles.forEach((role, roleIndex) => {
-        const staffList = [...(employeesByRole[role] || [])]; 
-        
-        // Acak urutan staff agar tidak selalu orang yang sama di awal
-        staffList.sort(() => Math.random() - 0.5);
-
-        if (staffList.length === 0) return;
-
-        const totalStaff = staffList.length;
-        const totalShiftsType = availableShifts.length; 
-
-        // Loop 7 Hari (Senin - Minggu)
-        for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-            const targetDate = new Date(start);
-            targetDate.setDate(targetDate.getDate() + dayIndex);
-            const dateStr = targetDate.toISOString().split('T')[0];
-
-            const currentSlot = schedule[role]?.[dayIndex];
-
-            // Hanya isi slot yang kosong
-            if (currentSlot && currentSlot.type === 'empty') {
-                
-                // LOGIKA 1: ROTASI SHIFT HARIAN (ZIG-ZAG)
-                // (Minggu + UrutanJabatan + Hari) % TotalTipeShift
-                // Hasil: Senin (Pagi), Selasa (Malam), Rabu (Pagi), dst.
-                const shiftIndex = (weekNum + roleIndex + dayIndex) % totalShiftsType;
-                const selectedShift = availableShifts[shiftIndex];
-
-                // LOGIKA 2: GILIRAN KARYAWAN
-                // Pastikan karyawan juga bergilir setiap hari
-                const selectedStaffIndex = dayIndex % totalStaff;
-                const selectedStaff = staffList[selectedStaffIndex];
-
-                updates.push({
-                    role: role,
-                    date: dateStr,
-                    shift_name: selectedShift.name,
-                    shift_time: `${selectedShift.start_time.slice(0,5)} - ${selectedShift.end_time.slice(0,5)}`,
-                    employee_name: selectedStaff.name,
-                    employee_id: selectedStaff.id,
-                    type: 'filled'
-                });
-            }
-        }
-    });
-
-    if (updates.length > 0) {
-        await supabase.from("schedules").upsert(updates, { onConflict: 'role, date' });
-        showToast(`Berhasil generate ${updates.length} jadwal dengan variasi shift!`, "success");
-        await fetchScheduleData();
-    } else {
-        showToast("Tidak ada slot kosong yang perlu diisi.", "error");
-    }
-    
-    setIsProcessing(false);
-    setIsAutoScheduleOpen(false);
-  };
+  const filteredEmployees = employees.filter(emp => 
+    emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    emp.role.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
-    <div className="flex flex-col h-full space-y-4 relative">
-       <AnimatePresence>
-        {toast && (
-          <motion.div 
-            initial={{ opacity: 0, y: -20, x: "-50%" }} animate={{ opacity: 1, y: 0, x: "-50%" }} exit={{ opacity: 0, y: -20, x: "-50%" }}
-            className={`fixed top-6 left-1/2 z-50 flex items-center gap-3 px-6 py-3 rounded-full shadow-2xl border ${
-              toast.type === 'success' ? "bg-emerald-600 border-emerald-500 text-white" : "bg-red-600 border-red-500 text-white"
-            }`}
-          >
-            {toast.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
-            <span className="font-medium text-sm">{toast.message}</span>
-            <button onClick={() => setToast(null)}><X className="w-4 h-4 opacity-80 hover:opacity-100"/></button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="p-6 space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Data Karyawan</h1>
+          <p className="text-slate-500">Kelola daftar karyawan dan jabatan.</p>
+        </div>
+        <Button 
+          onClick={() => { resetForm(); setIsModalOpen(true); }} 
+          className="bg-[#0B4650] hover:bg-[#093e47] text-white"
+        >
+          <UserPlus className="w-4 h-4 mr-2" /> Tambah Karyawan
+        </Button>
+      </div>
 
-       {isSwapMode && (
-         <div className="fixed inset-x-0 top-24 z-40 flex justify-center pointer-events-none">
-            <motion.div 
-              initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-              className="bg-[#0B4650] text-white px-6 py-2 rounded-full shadow-lg font-bold flex items-center gap-3 animate-pulse cursor-pointer border-2 border-white pointer-events-auto"
-              onClick={() => { setIsSwapMode(false); setSwapSourceSlot(null); }}
-            >
-               <ArrowRightLeft className="w-5 h-5" /> Mode Tukar Aktif: Klik Target (Batal)
-            </motion.div>
-         </div>
-       )}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+        <Input 
+          placeholder="Cari nama atau jabatan..." 
+          className="pl-10 max-w-sm border-slate-200"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
 
-       <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm shrink-0">
-          <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-              <Button variant="ghost" size="icon" onClick={handlePrevWeek}><ChevronLeft className="w-5 h-5" /></Button>
-              <div className="flex items-center gap-2 px-4 text-sm font-bold text-slate-800 min-w-[220px] justify-center">
-                 <CalendarIcon className="w-4 h-4 text-[#0B4650]" /> {formatDateRange(currentDate)}
-              </div>
-              <Button variant="ghost" size="icon" onClick={handleNextWeek}><ChevronRight className="w-5 h-5" /></Button>
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+            <tr>
+              <th className="px-6 py-4 font-semibold">Nama Karyawan</th>
+              <th className="px-6 py-4 font-semibold">Jabatan (Role)</th>
+              <th className="px-6 py-4 font-semibold">Status</th>
+              <th className="px-6 py-4 font-semibold">PIN</th>
+              <th className="px-6 py-4 font-semibold text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {isLoading ? (
+              <tr><td colSpan={5} className="text-center p-8">Memuat data...</td></tr>
+            ) : filteredEmployees.length === 0 ? (
+              <tr><td colSpan={5} className="text-center p-8 text-slate-400">Tidak ada data karyawan.</td></tr>
+            ) : (
+              filteredEmployees.map((emp) => (
+                <tr key={emp.id} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="px-6 py-4 font-medium text-slate-800 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-teal-100 flex items-center justify-center text-[#0B4650]">
+                      <User className="w-4 h-4" />
+                    </div>
+                    {emp.name}
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                      <Shield className="w-3 h-3" /> {emp.role}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      emp.status === 'active' 
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
+                        : "bg-slate-100 text-slate-500 border border-slate-200"
+                    }`}>
+                      {emp.status === 'active' ? 'Aktif' : 'Non-Aktif'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-slate-500 font-mono">
+                     {emp.pin ? '••••' : '-'}
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-[#0B4650]" onClick={() => handleEditClick(emp)}>
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600" onClick={() => handleDelete(emp.id)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <Modal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        title={editingId ? "Edit Karyawan" : "Tambah Karyawan Baru"}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Nama Lengkap</label>
+            <Input 
+              required 
+              value={formData.name} 
+              onChange={e => setFormData({...formData, name: e.target.value})}
+              placeholder="Contoh: Budi Santoso"
+            />
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4">
+            {/* --- BAGIAN YANG DIUBAH --- */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Jabatan</label>
+              {/* Input List untuk Autocomplete + Custom typing */}
+              <Input 
+                list="roles-list" 
+                required
+                placeholder="Pilih atau ketik baru..."
+                value={formData.role}
+                onChange={e => setFormData({...formData, role: e.target.value})}
+              />
+              {/* Datalist tidak terlihat, tapi muncul saat mengetik */}
+              <datalist id="roles-list">
+                 {existingRoles.map((role) => (
+                    <option key={role} value={role} />
+                 ))}
+              </datalist>
+            </div>
+            {/* ------------------------- */}
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Status</label>
+              <select 
+                className="w-full p-2 border border-slate-200 rounded-md text-sm"
+                value={formData.status}
+                onChange={e => setFormData({...formData, status: e.target.value as 'active' | 'inactive'})}
+              >
+                <option value="active">Aktif</option>
+                <option value="inactive">Non-Aktif</option>
+              </select>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
-             <Button variant="outline" onClick={() => setIsAutoScheduleOpen(true)} className="gap-2 border-slate-200 text-slate-600 hover:text-[#0B4650]">
-                <Sparkles className="w-4 h-4" /> Auto-Fill
-             </Button>
-             <Button onClick={() => setIsPreviewOpen(true)} className="gap-2 bg-[#0B4650] hover:bg-[#093e47] text-white shadow-md font-semibold px-6">
-                <Send className="w-4 h-4" /> Preview & Publish
+          <div className="space-y-2">
+             <label className="text-sm font-medium flex items-center gap-2">
+               <KeyRound className="w-3 h-3"/> PIN Akses (Opsional)
+             </label>
+             <Input 
+               type="text" 
+               maxLength={6}
+               value={formData.pin || ""} 
+               onChange={e => setFormData({...formData, pin: e.target.value})}
+               placeholder="123456"
+             />
+          </div>
+
+          <div className="pt-4">
+            <Button type="submit" className="w-full bg-[#0B4650] hover:bg-[#093e47]" disabled={isSubmitting}>
+              {isSubmitting ? "Menyimpan..." : "Simpan Data"}
             </Button>
           </div>
-       </div>
-
-       <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-4">
-          <ScheduleGrid 
-            schedule={schedule} 
-            selected={null} 
-            swapMode={isSwapMode} 
-            onSlotClick={handleSlotClick} 
-          />
-       </div>
-
-       <SchedulePreviewModal 
-          isOpen={isPreviewOpen}
-          onClose={() => setIsPreviewOpen(false)}
-          onPublish={handlePublish}
-          schedule={schedule}
-          roles={dynamicRoles}
-          currentDate={currentDate}
-       />
-
-       <Modal isOpen={isSlotActionOpen} onClose={() => setIsSlotActionOpen(false)} title="Atur Jadwal">
-          <div className="space-y-5">
-             <div className="p-3 bg-teal-50 border border-teal-100 rounded-lg text-center">
-                <span className="text-xs font-bold text-[#0B4650] uppercase tracking-wider">{selectedSlot?.role}</span>
-                <div className="font-bold text-slate-800 mt-1">
-                    {selectedSlot?.date ? new Date(selectedSlot.date).toLocaleDateString('id-ID', {weekday: 'long', day: 'numeric', month: 'long'}) : '-'}
-                </div>
-             </div>
-
-             <div className="space-y-4">
-                <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><User className="w-3 h-3"/> Karyawan</label>
-                    <select 
-                        className="w-full p-3 bg-white border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-[#0B4650]"
-                        value={selectedEmployeeId}
-                        onChange={(e) => setSelectedEmployeeId(e.target.value)}
-                    >
-                        <option value="">-- Pilih Karyawan --</option>
-                        {employeesByRole[selectedSlot?.role || ""]?.map((emp) => (
-                            <option key={emp.id} value={emp.id}>{emp.name}</option>
-                        ))}
-                    </select>
-                </div>
-
-                <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Clock className="w-3 h-3"/> Shift</label>
-                    <select 
-                        className="w-full p-3 bg-white border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-[#0B4650]"
-                        value={selectedShiftTime}
-                        onChange={(e) => setSelectedShiftTime(e.target.value)}
-                    >
-                        {shiftPatterns.map(sp => (
-                            <option key={sp.id} value={`${sp.start_time.slice(0,5)} - ${sp.end_time.slice(0,5)}`}>
-                                {sp.name} ({sp.start_time.slice(0,5)} - {sp.end_time.slice(0,5)})
-                            </option>
-                        ))}
-                    </select>
-                </div>
-             </div>
-
-             <div className="grid grid-cols-2 gap-2 pt-2">
-                 <Button variant="outline" onClick={handleInitiateSwap} className="text-[#0B4650] hover:bg-teal-50 border-teal-200 text-xs">
-                    <ArrowRightLeft className="w-3 h-3 mr-1" /> Tukar
-                 </Button>
-                 <Button variant="outline" onClick={handleMarkLeave} className="text-[#F58634] hover:bg-orange-50 border-orange-200 text-xs">
-                    <CalendarOff className="w-3 h-3 mr-1" /> Liburkan
-                 </Button>
-                 <Button variant="outline" onClick={handleDeleteSlot} className="col-span-2 text-red-600 hover:bg-red-50 border-red-200 text-xs">
-                    <Trash2 className="w-3 h-3 mr-1" /> Kosongkan Slot
-                 </Button>
-                 <Button onClick={handleSaveSlot} disabled={isProcessing} className="col-span-2 bg-[#0B4650] hover:bg-[#093e47] text-white font-bold py-3 mt-2">
-                    {isProcessing ? "Menyimpan..." : "Simpan Perubahan"}
-                 </Button>
-             </div>
-          </div>
-       </Modal>
-
-       <Modal isOpen={isAutoScheduleOpen} onClose={() => setIsAutoScheduleOpen(false)} title="Konfirmasi Auto-Fill">
-         <div className="p-4 space-y-4 text-center">
-            <div className="p-4 bg-teal-50 text-[#0B4650] rounded-lg text-sm border border-teal-200">
-                <Sparkles className="w-6 h-6 mx-auto mb-2 text-[#0B4650]" />
-                <p>Sistem akan mengisi <strong>{Object.keys(schedule).length * 7} slot</strong> secara otomatis.</p>
-                <p className="text-xs text-slate-500 mt-1">Menggunakan algoritma rotasi cerdas (Pagi/Malam).</p>
-            </div>
-            <div className="flex gap-2">
-                <Button variant="outline" className="flex-1" onClick={() => setIsAutoScheduleOpen(false)}>Batal</Button>
-                <Button className="flex-1 bg-[#0B4650] text-white" onClick={handleAutoGenerate} disabled={isProcessing}>
-                    {isProcessing ? "Proses..." : "Jalankan"}
-                </Button>
-            </div>
-         </div>
+        </form>
       </Modal>
     </div>
   );
