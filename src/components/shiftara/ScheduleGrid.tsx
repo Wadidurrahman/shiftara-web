@@ -16,7 +16,6 @@ const DAYS = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"];
 export default function ScheduleGrid({ schedule, selected, swapMode, onSlotClick }: ScheduleGridProps) {
   const roles = Object.keys(schedule);
 
-  // Helper untuk format tanggal di header (misal: 20 Jan)
   const getHeaderDate = (roleKey: string, dayIndex: number) => {
     const slot = schedule[roleKey]?.[dayIndex];
     if (!slot?.date) return "";

@@ -43,7 +43,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="id">
       <body className={inter.className}>
         <div className="flex h-screen bg-slate-50 overflow-hidden">
-          
           <motion.aside 
             initial={false}
             animate={{ width: isSidebarOpen ? 280 : 80 }}

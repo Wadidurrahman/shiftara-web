@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card} from "@/components/ui/card";
 import { Users, AlertCircle, Clock, CheckCircle2, ArrowRight, CalendarDays, RefreshCcw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { motion } from "framer-motion";
@@ -80,7 +80,7 @@ export default function DashboardPage() {
                     time: s.shift_time || "-",
                     status: s.type
                 }))
-                .sort((a, b) => (a.status === 'empty' ? -1 : 1));
+                .sort((a) => (a.status === 'empty' ? -1 : 1));
         };
 
         const yRoster = processRoster(yesterdayStr);
