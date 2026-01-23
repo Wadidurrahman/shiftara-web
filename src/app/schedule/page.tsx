@@ -7,7 +7,7 @@ import {
   Send, X, ArrowRightLeft, Calendar as CalendarIcon
 } from "lucide-react"; 
 import { Button } from "@/components/ui/button";
-import ScheduleGrid from "@/components/shiftara/ScheduleGrid";
+import ScheduleGrid from "@/components/shiftara/ScheduleGrid"; 
 import SchedulePreviewModal from "@/components/shiftara/SchedulePreviewModal"; 
 import Modal from "@/components/ui/Modal";
 import { supabase } from "@/lib/supabase";
@@ -22,7 +22,7 @@ export interface ShiftData {
   role: string;
   date?: string;
   shift_name?: string;
-  division?: string; // Update: Properti Divisi masuk ke data shift
+  division?: string;
 }
 
 interface Employee {
@@ -80,7 +80,7 @@ const shuffleArray = <T,>(array: T[]): T[] => {
     return array;
 };
 
-export default function SchedulePage() {
+export default function ShiftManagerPage() {
   const [schedule, setSchedule] = useState<Record<string, ShiftData[]>>({});
   const [groupedEmployees, setGroupedEmployees] = useState<Record<string, Employee[]>>({});
   const [sortedDivisions, setSortedDivisions] = useState<string[]>([]);
@@ -89,11 +89,13 @@ export default function SchedulePage() {
   const [shiftPatterns, setShiftPatterns] = useState<ShiftPattern[]>([]); 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+  
   const [isSlotActionOpen, setIsSlotActionOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false); 
   const [isAutoScheduleOpen, setIsAutoScheduleOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSwapMode, setIsSwapMode] = useState(false);
+
   const [selectedSlot, setSelectedSlot] = useState<{rowKey: string, index: number, date: string, data: ShiftData} | null>(null);
   const [swapSourceSlot, setSwapSourceSlot] = useState<ShiftData | null>(null);
   const [selectedShiftTime, setSelectedShiftTime] = useState("");
@@ -131,7 +133,7 @@ export default function SchedulePage() {
 
     const { data: shifts } = await supabase.from('shift_patterns').select('*').order('start_time');
     if (shifts && shifts.length > 0) {
-        setShiftPatterns(shifts);
+        setShiftPatterns(shifts as ShiftPattern[]);
     } else {
         setShiftPatterns([{ id: 'default', name: 'Pagi', start_time: '08:00', end_time: '16:00' }]);
     }
@@ -142,7 +144,7 @@ export default function SchedulePage() {
 
     if (!employees) return;
 
-    setAllEmployees(employees);
+    setAllEmployees(employees as Employee[]);
 
     const groups: Record<string, Employee[]> = {};
     const empMap: Record<string, Employee> = {};
@@ -150,8 +152,8 @@ export default function SchedulePage() {
     employees.forEach(emp => {
         const divName = emp.division || "Umum";
         if (!groups[divName]) groups[divName] = [];
-        groups[divName].push(emp);
-        empMap[emp.id] = emp; 
+        groups[divName].push(emp as Employee);
+        empMap[emp.id] = emp as Employee; 
     });
 
     setGroupedEmployees(groups);
@@ -186,7 +188,7 @@ export default function SchedulePage() {
                 role: found.role,
                 date: found.date,
                 shift_name: found.shift_name,
-                division: emp.division // Pastikan divisi masuk ke data slot
+                division: emp.division 
             };
         }
         
@@ -335,10 +337,34 @@ export default function SchedulePage() {
       setIsSlotActionOpen(false);
   };
 
-  const handlePublish = () => {
-      showToast("Jadwal Terpublikasi!", "success");
+  const handlePublish = async () => {
       setIsPreviewOpen(false);
-      if (waLink) window.open(waLink, '_blank');
+      
+      const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+      const publicLink = `${baseUrl}/jadwal-shift`; 
+
+      const message = `📢 *PENGUMUMAN JADWAL OPERASIONAL*\n\n` +
+                      `Kepada Seluruh Staff,\n` +
+                      `Jadwal shift terbaru telah diterbitkan dan diperbarui secara sistem.\n\n` +
+                      `Silakan cek jadwal, ajukan tukar shift, atau izin libur melalui portal resmi berikut:\n\n` +
+                      `🔗 *KLIK DISINI:*\n${publicLink}\n\n` +
+                      `_Mohon diperhatikan agar operasional berjalan lancar._\n` +
+                      `Terima kasih.`;
+
+      try {
+          await navigator.clipboard.writeText(message);
+          showToast("Pesan Resmi Tersalin! Paste di Grup WA.", "success");
+          
+          if (waLink) {
+              setTimeout(() => {
+                  window.open(waLink, '_blank');
+              }, 1000); 
+          } else {
+              showToast("Link Grup WhatsApp belum disetting.", "error");
+          }
+      } catch {
+          showToast("Gagal menyalin otomatis. Silakan copy manual.", "error");
+      }
   };
 
   const handleAutoGenerate = async () => {
@@ -364,9 +390,6 @@ export default function SchedulePage() {
         staffList = shuffleArray([...staffList]);
 
         staffList.forEach((emp, staffIndex) => {
-            // ALGORITMA COVERAGE:
-            // staffIndex % totalShifts menjamin setiap shift (Pagi/Malam)
-            // memiliki perwakilan dari divisi ini.
             const startShiftOffset = staffIndex % availableShifts.length;
             const rowKey = emp.id; 
             let workingDayCounter = 0; 
