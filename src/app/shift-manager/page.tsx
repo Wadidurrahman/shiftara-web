@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { 
-  ChevronLeft, ChevronRight, Sparkles, User, Clock, 
-  CheckCircle2, AlertCircle, Trash2, CalendarOff, 
+import {
+  ChevronLeft, ChevronRight, Sparkles, User, Clock,
+  CheckCircle2, AlertCircle, Trash2, CalendarOff,
   Send, X, ArrowRightLeft, Calendar as CalendarIcon
-} from "lucide-react"; 
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import ScheduleGrid from "@/components/shiftara/ScheduleGrid"; 
-import SchedulePreviewModal from "@/components/shiftara/SchedulePreviewModal"; 
+import ScheduleGrid from "@/components/shiftara/ScheduleGrid";
+import SchedulePreviewModal from "@/components/shiftara/SchedulePreviewModal";
 import Modal from "@/components/ui/Modal";
 import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
@@ -23,6 +23,7 @@ export interface ShiftData {
   date?: string;
   shift_name?: string;
   division?: string;
+  user_id?: string;
 }
 
 interface Employee {
@@ -32,6 +33,7 @@ interface Employee {
     division: string;
     status: string;
     pin?: string;
+    user_id?: string;
 }
 
 interface ShiftPattern {
@@ -39,6 +41,7 @@ interface ShiftPattern {
     name: string;
     start_time: string;
     end_time: string;
+    user_id?: string;
 }
 
 interface SchedulePayload {
@@ -49,16 +52,17 @@ interface SchedulePayload {
     employee_name: string;
     employee_id: string;
     type: string;
+    user_id: string;
 }
 
 const getWeekRange = (date: Date) => {
   const start = new Date(date);
-  const day = start.getDay(); 
-  const diff = start.getDate() - day + (day === 0 ? -6 : 1); 
+  const day = start.getDay();
+  const diff = start.getDate() - day + (day === 0 ? -6 : 1);
   start.setDate(diff);
   start.setHours(0, 0, 0, 0);
   const end = new Date(start);
-  end.setDate(start.getDate() + 6); 
+  end.setDate(start.getDate() + 6);
   end.setHours(23, 59, 59, 999);
   return { start, end };
 };
@@ -86,12 +90,12 @@ export default function ShiftManagerPage() {
   const [sortedDivisions, setSortedDivisions] = useState<string[]>([]);
   const [employeesByRowKey, setEmployeesByRowKey] = useState<Record<string, Employee>>({});
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
-  const [shiftPatterns, setShiftPatterns] = useState<ShiftPattern[]>([]); 
+  const [shiftPatterns, setShiftPatterns] = useState<ShiftPattern[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
-  
+
   const [isSlotActionOpen, setIsSlotActionOpen] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false); 
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isAutoScheduleOpen, setIsAutoScheduleOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSwapMode, setIsSwapMode] = useState(false);
@@ -100,11 +104,22 @@ export default function ShiftManagerPage() {
   const [swapSourceSlot, setSwapSourceSlot] = useState<ShiftData | null>(null);
   const [selectedShiftTime, setSelectedShiftTime] = useState("");
   const [waLink, setWaLink] = useState("");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
+
+  useEffect(() => {
+    const getUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            setCurrentUserId(user.id);
+        }
+    };
+    getUser();
+  }, []);
 
   const handlePrevWeek = () => {
     const newDate = new Date(currentDate);
@@ -120,14 +135,14 @@ export default function ShiftManagerPage() {
 
   const getShiftNameFromTime = useCallback((timeRange: string) => {
       if (!timeRange) return "Shift";
-      const startTimeToCheck = timeRange.split(' - ')[0]; 
+      const startTimeToCheck = timeRange.split(' - ')[0];
       const found = shiftPatterns.find(p => p.start_time.startsWith(startTimeToCheck));
       return found ? found.name : "Shift";
   }, [shiftPatterns]);
 
   const fetchScheduleData = useCallback(async () => {
     const { start, end } = getWeekRange(currentDate);
-    
+
     const { data: settings } = await supabase.from('app_settings').select('wa_group_link').maybeSingle();
     if (settings) setWaLink(settings.wa_group_link || "");
 
@@ -148,12 +163,12 @@ export default function ShiftManagerPage() {
 
     const groups: Record<string, Employee[]> = {};
     const empMap: Record<string, Employee> = {};
-    
+
     employees.forEach(emp => {
         const divName = emp.division || "Umum";
         if (!groups[divName]) groups[divName] = [];
         groups[divName].push(emp as Employee);
-        empMap[emp.id] = emp as Employee; 
+        empMap[emp.id] = emp as Employee;
     });
 
     setGroupedEmployees(groups);
@@ -167,15 +182,15 @@ export default function ShiftManagerPage() {
       .lte('date', end.toISOString());
 
     const formattedSchedule: Record<string, ShiftData[]> = {};
-    
+
     employees.forEach(emp => {
-      const rowKey = emp.id; 
-      
+      const rowKey = emp.id;
+
       formattedSchedule[rowKey] = Array(7).fill(null).map((_, i) => {
         const slotDate = new Date(start);
         slotDate.setDate(slotDate.getDate() + i);
         const dateString = slotDate.toISOString().split('T')[0];
-        
+
         const found = dbSchedules?.find(s => s.employee_id === emp.id && s.date === dateString);
 
         if (found) {
@@ -188,10 +203,11 @@ export default function ShiftManagerPage() {
                 role: found.role,
                 date: found.date,
                 shift_name: found.shift_name,
-                division: emp.division 
+                division: emp.division,
+                user_id: found.user_id
             };
         }
-        
+
         return {
              id: `empty-${emp.id}-${i}`,
              type: 'empty',
@@ -205,18 +221,23 @@ export default function ShiftManagerPage() {
       });
     });
     setSchedule(formattedSchedule);
-  }, [currentDate]); 
+  }, [currentDate]);
 
   useEffect(() => {
     let isMounted = true;
     const run = async () => { if(isMounted) await fetchScheduleData(); };
     run();
     return () => { isMounted = false; };
-  }, [fetchScheduleData]); 
+  }, [fetchScheduleData]);
 
   const handleSlotClick = async (rowKey: string, idx: number) => {
     const clickedSlot = schedule[rowKey][idx];
     if(!clickedSlot || !clickedSlot.date) return;
+
+    if(!currentUserId) {
+        showToast("Sesi login berakhir. Silakan refresh.", "error");
+        return;
+    }
 
     if (isSwapMode && swapSourceSlot) {
         setIsProcessing(true);
@@ -231,13 +252,14 @@ export default function ShiftManagerPage() {
 
         if(swapSourceSlot.type !== 'empty') {
              await supabase.from("schedules").insert([{
-                 role: employeesByRowKey[rowKey].role, 
+                 role: employeesByRowKey[rowKey].role,
                  date: clickedSlot.date,
                  employee_name: employeesByRowKey[rowKey].name,
-                 employee_id: employeesByRowKey[rowKey].id, 
-                 shift_time: swapSourceSlot.time, 
+                 employee_id: employeesByRowKey[rowKey].id,
+                 shift_time: swapSourceSlot.time,
                  shift_name: swapSourceSlot.shift_name,
-                 type: 'filled'
+                 type: 'filled',
+                 user_id: currentUserId
              }]);
         }
 
@@ -245,11 +267,12 @@ export default function ShiftManagerPage() {
             await supabase.from("schedules").insert([{
                 role: swapSourceSlot.role,
                 date: swapSourceSlot.date,
-                employee_name: swapSourceSlot.name, 
+                employee_name: swapSourceSlot.name,
                 employee_id: swapSourceSlot.employee_id,
-                shift_time: clickedSlot.time, 
+                shift_time: clickedSlot.time,
                 shift_name: clickedSlot.shift_name,
-                type: 'filled'
+                type: 'filled',
+                user_id: currentUserId
             }]);
         }
 
@@ -280,10 +303,10 @@ export default function ShiftManagerPage() {
   };
 
   const handleSaveSlot = async () => {
-    if (!selectedSlot) return;
+    if (!selectedSlot || !currentUserId) return;
     setIsProcessing(true);
     const employee = employeesByRowKey[selectedSlot.rowKey];
-    
+
     if (employee) {
        const payload = {
           role: employee.role,
@@ -292,11 +315,12 @@ export default function ShiftManagerPage() {
           employee_name: employee.name,
           shift_time: selectedShiftTime,
           shift_name: getShiftNameFromTime(selectedShiftTime),
-          type: 'filled'
+          type: 'filled',
+          user_id: currentUserId
        };
        await supabase.from("schedules").delete().match({ employee_id: employee.id, date: selectedSlot.date });
        const { error } = await supabase.from("schedules").insert(payload);
-       
+
        if (error) showToast("Gagal: " + error.message, "error");
        else showToast("Jadwal tersimpan", "success");
     }
@@ -317,7 +341,7 @@ export default function ShiftManagerPage() {
   };
 
   const handleMarkLeave = async () => {
-      if (!selectedSlot) return;
+      if (!selectedSlot || !currentUserId) return;
       setIsProcessing(true);
       const employee = employeesByRowKey[selectedSlot.rowKey];
       const payload = {
@@ -327,7 +351,8 @@ export default function ShiftManagerPage() {
           type: 'leave',
           employee_name: 'CUTI / LIBUR',
           shift_time: '-',
-          shift_name: 'Libur'
+          shift_name: 'Libur',
+          user_id: currentUserId
       };
       await supabase.from("schedules").delete().match({ employee_id: employee.id, date: selectedSlot.date });
       await supabase.from("schedules").insert(payload);
@@ -339,28 +364,20 @@ export default function ShiftManagerPage() {
 
   const handlePublish = async () => {
       setIsPreviewOpen(false);
-      
       const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-      const publicLink = `${baseUrl}/jadwal-shift`; 
+      const publicLink = `${baseUrl}/jadwal-shift`;
 
       const message = `📢 *PENGUMUMAN JADWAL OPERASIONAL*\n\n` +
                       `Kepada Seluruh Staff,\n` +
-                      `Jadwal shift terbaru telah diterbitkan dan diperbarui secara sistem.\n\n` +
-                      `Silakan cek jadwal, ajukan tukar shift, atau izin libur melalui portal resmi berikut:\n\n` +
-                      `🔗 *KLIK DISINI:*\n${publicLink}\n\n` +
-                      `_Mohon diperhatikan agar operasional berjalan lancar._\n` +
+                      `Jadwal shift terbaru telah diterbitkan.\n\n` +
+                      `🔗 *CEK JADWAL ANDA DISINI:*\n${publicLink}\n\n` +
                       `Terima kasih.`;
 
       try {
           await navigator.clipboard.writeText(message);
           showToast("Pesan Resmi Tersalin! Paste di Grup WA.", "success");
-          
           if (waLink) {
-              setTimeout(() => {
-                  window.open(waLink, '_blank');
-              }, 1000); 
-          } else {
-              showToast("Link Grup WhatsApp belum disetting.", "error");
+              setTimeout(() => { window.open(waLink, '_blank'); }, 1000);
           }
       } catch {
           showToast("Gagal menyalin otomatis. Silakan copy manual.", "error");
@@ -368,12 +385,13 @@ export default function ShiftManagerPage() {
   };
 
   const handleAutoGenerate = async () => {
+    if (!currentUserId) return;
     setIsProcessing(true);
     const updates: SchedulePayload[] = [];
     const { start } = getWeekRange(currentDate);
 
-    const availableShifts = shiftPatterns.length > 0 
-        ? shiftPatterns 
+    const availableShifts = shiftPatterns.length > 0
+        ? shiftPatterns
         : [{ id: 'def', name: 'Regular', start_time: '08:00', end_time: '17:00' }];
 
     const staffByDivision: Record<string, Employee[]> = {};
@@ -383,7 +401,7 @@ export default function ShiftManagerPage() {
         staffByDivision[div].push(emp);
     });
 
-    const ROTATION_BLOCK_DAYS = 2; 
+    const ROTATION_BLOCK_DAYS = 2;
 
     for (const division in staffByDivision) {
         let staffList = staffByDivision[division];
@@ -391,8 +409,8 @@ export default function ShiftManagerPage() {
 
         staffList.forEach((emp, staffIndex) => {
             const startShiftOffset = staffIndex % availableShifts.length;
-            const rowKey = emp.id; 
-            let workingDayCounter = 0; 
+            const rowKey = emp.id;
+            let workingDayCounter = 0;
 
             for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
                 const targetDate = new Date(start);
@@ -402,7 +420,7 @@ export default function ShiftManagerPage() {
 
                 if (currentSlot && (currentSlot.type === 'leave' || currentSlot.type === 'filled')) {
                     if(currentSlot.type === 'filled') workingDayCounter++;
-                    continue; 
+                    continue;
                 }
 
                 const shiftBlock = Math.floor(workingDayCounter / ROTATION_BLOCK_DAYS);
@@ -416,7 +434,8 @@ export default function ShiftManagerPage() {
                     shift_time: `${selectedShift.start_time.slice(0,5)} - ${selectedShift.end_time.slice(0,5)}`,
                     employee_name: emp.name,
                     employee_id: emp.id,
-                    type: 'filled'
+                    type: 'filled',
+                    user_id: currentUserId
                 });
                 workingDayCounter++;
             }
@@ -437,7 +456,7 @@ export default function ShiftManagerPage() {
     } else {
         showToast("Semua slot sudah terisi penuh.", "success");
     }
-    
+
     setIsProcessing(false);
     setIsAutoScheduleOpen(false);
   };
@@ -446,7 +465,7 @@ export default function ShiftManagerPage() {
     <div className="flex flex-col h-full space-y-4 relative">
        <AnimatePresence>
         {toast && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: -20, x: "-50%" }} animate={{ opacity: 1, y: 0, x: "-50%" }} exit={{ opacity: 0, y: -20, x: "-50%" }}
             className={`fixed top-6 left-1/2 z-50 flex items-center gap-3 px-6 py-3 rounded-full shadow-2xl border ${
               toast.type === 'success' ? "bg-emerald-600 border-emerald-500 text-white" : "bg-red-600 border-red-500 text-white"
@@ -461,7 +480,7 @@ export default function ShiftManagerPage() {
 
        {isSwapMode && (
          <div className="fixed inset-x-0 top-24 z-40 flex justify-center pointer-events-none">
-            <motion.div 
+            <motion.div
               initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
               className="bg-[#0B4650] text-white px-6 py-2 rounded-full shadow-lg font-bold flex items-center gap-3 animate-pulse cursor-pointer border-2 border-white pointer-events-auto"
               onClick={() => { setIsSwapMode(false); setSwapSourceSlot(null); }}
@@ -491,22 +510,22 @@ export default function ShiftManagerPage() {
        </div>
 
        <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-4">
-          <ScheduleGrid 
-            schedule={schedule} 
-            groupedEmployees={groupedEmployees} 
-            sortedDivisions={sortedDivisions}   
+          <ScheduleGrid
+            schedule={schedule}
+            groupedEmployees={groupedEmployees}
+            sortedDivisions={sortedDivisions}
             selected={selectedSlot ? { rowKey: selectedSlot.rowKey, index: selectedSlot.index } : null}
-            swapMode={isSwapMode} 
-            onSlotClick={handleSlotClick} 
+            swapMode={isSwapMode}
+            onSlotClick={handleSlotClick}
           />
        </div>
 
-       <SchedulePreviewModal 
+       <SchedulePreviewModal
          isOpen={isPreviewOpen}
          onClose={() => setIsPreviewOpen(false)}
          onPublish={handlePublish}
          schedule={schedule}
-         groupedEmployees={groupedEmployees} 
+         groupedEmployees={groupedEmployees}
          sortedDivisions={sortedDivisions}
          currentDate={currentDate}
        />
@@ -532,7 +551,7 @@ export default function ShiftManagerPage() {
 
                 <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Clock className="w-3 h-3"/> Shift</label>
-                    <select 
+                    <select
                         className="w-full p-3 bg-white border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-[#0B4650]"
                         value={selectedShiftTime}
                         onChange={(e) => setSelectedShiftTime(e.target.value)}

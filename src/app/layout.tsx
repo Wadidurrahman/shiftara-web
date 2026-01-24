@@ -3,7 +3,7 @@
 import { Inter } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { 
   LayoutDashboard, CalendarDays, Users, Settings, 
@@ -12,19 +12,38 @@ import {
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
+import { supabase } from "@/lib/supabase"; 
 import Image from "next/image";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+  const pathname = usePathname() || "";
+  const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.replace("/admin-auth");
+  };
+
+  const isPublicPage = pathname === "/admin-auth" || pathname.startsWith("/jadwal-shift");
+
+  if (isPublicPage) {
+    return (
+      <html lang="id">
+        <body className={inter.className}>
+          {children}
+        </body>
+      </html>
+    );
+  }
+
   const links = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/schedule", label: "Jadwal Shift", icon: CalendarDays },
+    { href: "/shift-manager", label: "Jadwal Shift", icon: CalendarDays },
     { href: "/employees", label: "Karyawan", icon: Users },
     { href: "/settings", label: "Pengaturan", icon: Settings },
   ];
@@ -32,7 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const getPageTitle = () => {
     switch (pathname) {
       case "/": return "Dashboard Overview";
-      case "/schedule": return "Manajemen Jadwal";
+      case "/shift-manager": return "Manajemen Jadwal";
       case "/employees": return "Data Karyawan";
       case "/settings": return "Konfigurasi Sistem";
       default: return "Shiftara";
@@ -50,7 +69,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           >
             <div className="h-20 flex items-center gap-3 px-6 border-b border-white/10 bg-[#093e47] overflow-hidden relative">
               <div className="relative w-9 h-9 shrink-0 bg-white rounded-lg p-1">
-                <Image src="/logo-shiftara.png" alt="Logo" fill className="object-contain p-1" />
+                <Image 
+                  src="/logo-shiftara.png" 
+                  alt="Logo" 
+                  fill 
+                  className="object-contain p-0.5" 
+                  priority
+                />
               </div>
               <motion.div 
                 animate={{ opacity: isSidebarOpen ? 1 : 0, x: isSidebarOpen ? 0 : -20 }}
@@ -71,7 +96,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             
             <nav className="flex-1 px-3 space-y-2 py-8 overflow-x-hidden">
               {isSidebarOpen && (
-                <div className="px-4 pb-2 text-[10px] font-bold text-white tracking-widest opacity-80 animate-in fade-in duration-300">
+                <div className="px-4 pb-2 text-lg font-bold text-white tracking-widest opacity-80 animate-in fade-in duration-300">
                   Menu Utama
                 </div>
               )}
@@ -118,7 +143,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </nav>
             
             <div className="p-4 border-t border-white/10 bg-[#08353d]">
-               <button className={`flex items-center gap-3 px-3 py-3 w-full text-sm font-medium rounded-lg text-red-300 hover:bg-red-500/10 hover:text-red-200 transition-colors group ${!isSidebarOpen && 'justify-center'}`}>
+               <button 
+                onClick={handleLogout}
+                className={`flex items-center gap-3 px-3 py-3 w-full text-sm font-medium rounded-lg text-red-300 hover:bg-red-500/10 hover:text-red-200 transition-colors group ${!isSidebarOpen && 'justify-center'}`}
+               >
                 <LogOut className="w-5 h-5 group-hover:-translate-x-1 transition-transform" /> 
                 {isSidebarOpen && <span>Keluar Sistem</span>}
                </button>
@@ -137,8 +165,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     </SheetTrigger>
                     <SheetContent side="left" className="bg-[#0B4650] text-white w-72 p-0 border-r-[#083a42]">
                       <div className="h-16 flex items-center gap-3 px-6 border-b border-white/10 bg-[#093e47]">
-                        <div className="relative w-8 h-8 bg-white rounded p-1">
-                           <Image src="/logo-shiftara.png" alt="Logo" fill className="object-contain" />
+                        <div className="relative w-8 h-8 bg-white rounded p-1 flex items-center justify-center font-bold text-[#0B4650]">
+                           S
                         </div>
                         <h1 className="text-xl font-black text-white">
                             <span className="text-[#F58634]">Shif</span>Tara
@@ -157,6 +185,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                             </Link>
                           )
                         })}
+                        <div 
+                            onClick={handleLogout}
+                            className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-red-300 hover:bg-red-900/20 cursor-pointer mt-4"
+                        >
+                            <LogOut className="w-5 h-5" /> Keluar
+                        </div>
                       </nav>
                     </SheetContent>
                   </Sheet>
@@ -183,7 +217,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     <p className="text-sm font-bold text-slate-800 leading-none">Admin Pusat</p>
                     <p className="text-[10px] text-slate-500 font-medium mt-0.5">Manager Operasional</p>
                   </div>
-                  
                 </div>
               </div>
             </header>
