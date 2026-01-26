@@ -1,93 +1,105 @@
 "use client";
 
-import { GraduationCap, User } from "lucide-react";
-import { ShiftData } from "@/types";
+import { Clock } from "lucide-react";
+import { ShiftData } from "@/app/shift-manager/page";
 import { motion } from "framer-motion";
+import React from "react";
 
 interface ShiftCardProps {
   data: ShiftData;
-  isTrainee?: boolean;
   onClick: () => void;
   isSelected: boolean;
   isSwapMode: boolean;
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragOver?: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDrop?: (e: React.DragEvent<HTMLDivElement>) => void;
 }
 
-export default function ShiftCard({ data, isTrainee = false, onClick, isSelected, isSwapMode }: ShiftCardProps) {
+export default function ShiftCard({ 
+  data, 
+  onClick, 
+  isSelected, 
+  isSwapMode, 
+  draggable, 
+  onDragStart, 
+  onDragOver, 
+  onDrop 
+}: ShiftCardProps) {
   
+  const baseClasses = `
+    relative h-full min-h-[80px] w-full rounded-lg p-2.5 flex flex-col justify-between 
+    transition-all duration-200 border select-none group
+    ${isSelected ? "ring-2 ring-blue-500 border-blue-500 z-10 bg-blue-50/50" : ""}
+    ${isSwapMode && !isSelected ? "cursor-copy hover:ring-2 hover:ring-amber-400 hover:bg-amber-50" : ""}
+    ${draggable ? "cursor-grab active:cursor-grabbing" : ""}
+  `;
+
   if (data.type === "filled") {
     return (
       <motion.div 
-        whileHover={{ scale: isSwapMode ? 1.02 : 1, y: -2 }}
-        whileTap={{ scale: 0.98 }}
+        layoutId={`shift-${data.id}`}
+        className={`${baseClasses} bg-white border-slate-200 hover:shadow-md hover:border-blue-300`}
         onClick={onClick}
-        className={`relative h-full min-h-28 w-full rounded-lg p-3 flex flex-col justify-between transition-all duration-200 border shadow-sm
-          ${isSelected 
-            ? "bg-secondary/20 border-secondary ring-2 ring-secondary shadow-md z-10" 
-            : "bg-white border-slate-200 hover:border-primary hover:shadow-md" 
-          }
-          ${isSwapMode ? "cursor-pointer" : ""}
-        `}
+        draggable={draggable}
+        onDragStart={(e) => onDragStart && onDragStart(e as unknown as React.DragEvent<HTMLDivElement>)}
+        onDragOver={(e) => onDragOver && onDragOver(e as unknown as React.DragEvent<HTMLDivElement>)}
+        onDrop={(e) => onDrop && onDrop(e as unknown as React.DragEvent<HTMLDivElement>)}
       >
-        <div className="flex items-start justify-between">
-          <div className={`flex items-center gap-2 px-2 py-1 rounded-md ${isTrainee ? 'bg-orange-100 text-orange-700' : 'bg-primary/10 text-primary'}`}>
-            <div className={`w-2 h-2 rounded-full ${isTrainee ? 'bg-orange-500 animate-pulse' : 'bg-primary'}`}></div>
-            <span className="text-[10px] font-bold uppercase tracking-wider">{isTrainee ? 'Training' : 'Inti'}</span>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border border-blue-100">
+             <Clock className="w-2.5 h-2.5" />
+             {data.time ? data.time.split(" - ")[0] : "-"}
           </div>
-          <span className="text-[11px] font-mono text-slate-500 font-bold">{data.time.split(" - ")[0]}</span>
+          <span className="text-[9px] font-medium text-slate-400 bg-slate-50 px-1 rounded">
+            {data.shift_name || "Shift"}
+          </span>
         </div>
 
-        <div className="flex items-center gap-3 mt-2">
-           <div className={`w-8 h-8 rounded-md flex items-center justify-center shadow-sm border border-white ${isTrainee ? 'bg-orange-50 text-orange-600' : 'bg-primary text-white'}`}>
-             {isTrainee ? <GraduationCap className="w-5 h-5" /> : <User className="w-5 h-5" />}
+        <div className="flex items-center gap-2">
+           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm border border-white
+             ${data.role === 'Senior' ? 'bg-indigo-600 text-white' : 'bg-teal-600 text-white'}
+           `}>
+             {data.name?.substring(0,2).toUpperCase()}
            </div>
-           <div>
-             <span className={`font-bold text-sm leading-tight line-clamp-1 ${isSelected ? 'text-primary' : 'text-slate-800'}`}>
+           <div className="overflow-hidden">
+             <p className={`text-xs font-bold truncate ${isSelected ? 'text-blue-700' : 'text-slate-800'}`}>
                 {data.name}
-             </span>
-             <span className="text-[10px] text-slate-500 font-medium block -mt-0.5">{data.role}</span>
+             </p>
+             <p className="text-[9px] text-slate-500 truncate -mt-0.5">{data.role}</p>
            </div>
         </div>
-
-        {isSwapMode && !isSelected && (
-           <motion.div 
-             initial={{ opacity: 0 }}
-             animate={{ opacity: 1 }}
-             className="absolute inset-0 bg-primary/5 backdrop-blur-[1px] flex items-center justify-center rounded-lg border-2 border-dashed border-secondary z-20"
-           >
-              <span className="bg-secondary text-primary text-xs font-black px-4 py-2 rounded-md shadow-lg uppercase tracking-widest transform scale-90 hover:scale-100 transition-transform">
-                PILIH
-              </span>
-           </motion.div>
-        )}
       </motion.div>
     );
   }
 
   if (data.type === "empty") {
     return (
-      <motion.div 
-        whileHover={{ scale: 1.02, backgroundColor: "#f8fafc" }}
-        whileTap={{ scale: 0.98 }}
+      <div 
+        className={`${baseClasses} bg-slate-50 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50/30 flex items-center justify-center`}
         onClick={onClick}
-        className={`h-full min-h-28 w-full rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-all group bg-slate-50/50
-          ${isSelected 
-             ? "border-secondary bg-secondary/10" 
-             : "border-slate-300 hover:border-primary"}
-          ${isSwapMode ? "cursor-pointer" : ""}
-        `}
+        onDragOver={onDragOver} 
+        onDrop={onDrop}         
       >
-        <div className="w-10 h-10 rounded-md bg-white group-hover:bg-primary text-slate-400 group-hover:text-white flex items-center justify-center transition-colors shadow-sm border border-slate-200 group-hover:border-primary">
-           <span className="text-2xl font-light pb-1">+</span>
+        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center">
+           <span className="text-xl text-blue-400 font-light">+</span>
+           <span className="text-[9px] text-blue-400 font-bold uppercase">Isi</span>
         </div>
-        <span className="text-[10px] font-bold text-slate-400 group-hover:text-primary uppercase tracking-widest transition-colors">Kosong</span>
-      </motion.div>
+      </div>
     );
   }
 
   return (
-    <div className="h-full min-h-28 w-full rounded-lg border border-slate-200 bg-slate-100 flex flex-col items-center justify-center text-center p-2 opacity-75 grayscale">
-       <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-md mb-2 shadow-sm uppercase tracking-wider">CUTI</span>
-       <span className="text-xs text-slate-600 font-bold truncate w-full">{data.name}</span>
+    <div 
+      className={`${baseClasses} bg-red-50/50 border-red-100 flex flex-col items-center justify-center opacity-80`}
+      onClick={onClick}
+    >
+       <span className="text-[10px] font-black text-red-400 bg-white border border-red-100 px-2 py-0.5 rounded shadow-sm uppercase tracking-widest mb-1">
+         OFF
+       </span>
+       <span className="text-[10px] text-red-300 font-medium truncate w-full text-center">
+         {data.name}
+       </span>
     </div>
   );
 }

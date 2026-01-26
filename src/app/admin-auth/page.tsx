@@ -47,7 +47,7 @@ export default function AdminAuthPage() {
         </div>
 
         <div className="w-full max-w-sm mx-auto flex flex-col h-full justify-center relative z-10 pt-6">
-            <div className="lg:hidden mb-6 w-32 h-10 relative">
+            <div className="lg:hidden mb-6 w-32 h-10 relative ">
                <Image src="/logo.png" alt="Logo" fill className="object-contain object-left" />
             </div>
 
@@ -71,7 +71,7 @@ export default function AdminAuthPage() {
 
         <div className="relative z-10 w-full h-full flex flex-col justify-end items-center pb-0">
             <div className="absolute top-[4%] w-full flex flex-col items-center space-y-6 z-30">
-                <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, ease: "easeOut" }} className="relative w-64 h-20 drop-shadow-2xl">
+                <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, ease: "easeOut" }} className="relative w-64 h-20 drop-shadow-2xl bg-slate-200 rounded-md shadow-lg">
                     <Image src="/logo.png" alt="Shiftara Brand" fill className="object-contain" quality={100} priority />
                 </motion.div>
 

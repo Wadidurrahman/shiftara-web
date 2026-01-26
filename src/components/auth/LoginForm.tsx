@@ -70,10 +70,10 @@ export default function LoginForm({ onToggleRegister, onGoogleLogin }: LoginForm
 
       <form onSubmit={handleLogin} className="space-y-4">
         <div className="space-y-1.5">
-          <label className="text-xs font- semi bold text-slate-700  tracking-wider">Email Kantor</label>
+          <label className="text-xs font- semi bold text-slate-700  tracking-wider">Email </label>
           <div className="relative group">
             <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#0B4650] transition-colors" />
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nama@perusahaan.com" required className="h-11 pl-10 rounded-lg border-slate-200 bg-white/80 focus:bg-white focus:border-[#0B4650] focus:ring-2 focus:ring-[#0B4650]/20 text-sm transition-all" />
+            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Masukkan email anda" required className="h-11 pl-10 rounded-lg border-slate-200 bg-white/80 focus:bg-white focus:border-[#0B4650] focus:ring-2 focus:ring-[#0B4650]/20 text-sm transition-all" />
           </div>
         </div>
 
