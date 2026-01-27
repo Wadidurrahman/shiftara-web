@@ -8,40 +8,11 @@ import {
 import { Button } from "@/components/ui/button";
 import ScheduleGrid from "@/components/shiftara/ScheduleGrid";
 import SchedulePreviewModal from "@/components/shiftara/SchedulePreviewModal";
-import EditSlotModal from "@/components/shiftara/EditSlotModal"; // Import Baru
-import AutoScheduleModal from "@/components/shiftara/AutoScheduleModal"; // Import Baru
+import EditSlotModal from "@/components/shiftara/EditSlotModal"; 
+import AutoScheduleModal from "@/components/shiftara/AutoScheduleModal";
 import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
-
-// --- TIPE DATA (Sama seperti sebelumnya) ---
-export interface ShiftData {
-  id: string;
-  type: 'filled' | 'leave' | 'empty';
-  name?: string;
-  employee_id?: string;
-  time: string;
-  role: string;
-  date?: string;
-  shift_name?: string;
-  division?: string;
-  user_id?: string;
-}
-
-interface Employee {
-    id: string;
-    name: string;
-    role: string;
-    division: string;
-    status: string;
-    user_id?: string;
-}
-
-interface ShiftPattern {
-    id: string;
-    name: string;
-    start_time: string;
-    end_time: string;
-}
+import { ShiftData, Employee, ShiftPattern } from "@/types/index";
 
 const getWeekRange = (date: Date) => {
   const start = new Date(date);
