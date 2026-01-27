@@ -2,15 +2,8 @@
 
 import React from "react";
 import { Users } from "lucide-react";
-import ShiftCard from "./ShiftCard";
-import { ShiftData } from "@/app/shift-manager/page"; 
-
-interface Employee {
-    id: string;
-    name: string;
-    role: string;
-    division: string;
-}
+import ShiftCard from "./ShiftCard"; 
+import { ShiftData, Employee } from "@/types";
 
 interface ScheduleGridProps {
   schedule: Record<string, ShiftData[]>;
@@ -71,7 +64,6 @@ export default function ScheduleGrid({
     <div className="w-full h-full border border-slate-300 rounded-xl shadow-sm bg-white flex flex-col overflow-hidden">
       <div className="flex-1 overflow-auto custom-scrollbar w-full relative">
         <table className="w-full min-w-[1200px] border-collapse text-sm">
-          
           <thead className="sticky top-0 z-30"> 
             <tr className="bg-slate-100 border-b border-slate-300 h-12 shadow-sm">
               <th className="p-4 px-8 text-left text-xs font-bold text-slate-600 uppercase tracking-wider min-w-[200px] sticky left-0 top-0 z-40 bg-slate-100 border-r border-slate-300">

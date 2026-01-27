@@ -4,13 +4,12 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   LayoutDashboard, CalendarDays, Users, Settings, 
-  Menu, LogOut, Bell, ChevronLeft, ChevronRight 
+  Menu, LogOut, ChevronLeft, ChevronRight 
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabase"; 
 import Image from "next/image";
@@ -21,15 +20,38 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const pathname = usePathname() || "";
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [companyName, setCompanyName] = useState("Memuat...");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
+
+  useEffect(() => {
+    const getUserData = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('users')
+          .select('company_name, logo_url')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (profile) {
+            setCompanyName(profile.company_name || "Perusahaan");
+            setLogoUrl(profile.logo_url);
+        } else {
+            setCompanyName(user.user_metadata?.company_name || "Shiftara Company");
+        }
+      }
+    };
+    getUserData();
+  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.replace("/admin-auth");
   };
 
-  const isPublicPage = pathname === "/admin-auth" || pathname.startsWith("/jadwal-shift");
+  const isPublicPage = pathname === "/admin-auth" || pathname.startsWith("/jadwal-shift") || pathname.startsWith("/shiftview") || pathname.startsWith("/update-password");
 
   if (isPublicPage) {
     return (
@@ -73,6 +95,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   src="/logo-shiftara.png" 
                   alt="Logo" 
                   fill 
+                  sizes="36px"
+                  unoptimized
                   className="object-contain p-0.5" 
                   priority
                 />
@@ -158,10 +182,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <div className="flex items-center gap-4">
                 <div className="md:hidden">
                   <Sheet>
-                    <SheetTrigger asChild>
-                      <Button variant="ghost" size="icon" className="hover:bg-slate-100 rounded-lg text-[#0B4650]">
+                    <SheetTrigger>
+                      <div className="p-2 hover:bg-slate-100 rounded-lg text-[#0B4650] cursor-pointer">
                         <Menu className="w-6 h-6" />
-                      </Button>
+                      </div>
                     </SheetTrigger>
                     <SheetContent side="left" className="bg-[#0B4650] text-white w-72 p-0 border-r-[#083a42]">
                       <div className="h-16 flex items-center gap-3 px-6 border-b border-white/10 bg-[#093e47]">
@@ -207,16 +231,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
               
               <div className="flex items-center gap-4 md:gap-6">
-                <Button variant="ghost" size="icon" className="relative text-slate-400 hover:text-[#F58634] hover:bg-orange-50 rounded-full transition-colors">
-                    <Bell className="w-5 h-5" />
-                    <span className="absolute top-2 right-2 w-2 h-2 bg-[#F58634] rounded-full border-2 border-white animate-pulse"></span>
-                </Button>
-                
                 <div className="flex items-center gap-3 pl-4 md:pl-6 border-l border-slate-200">
                   <div className="text-right hidden sm:block">
-                    <p className="text-sm font-bold text-slate-800 leading-none">Admin Pusat</p>
-                    <p className="text-[10px] text-slate-500 font-medium mt-0.5">Manager Operasional</p>
+                    <p className="text-sm font-bold text-slate-800 leading-none">{companyName}</p>
+                    <p className="text-[10px] text-slate-500 font-medium mt-0.5">Perusahaan</p>
                   </div>
+                  {logoUrl ? (
+                     <div className="h-9 w-9 relative rounded-full overflow-hidden shadow-sm ring-2 ring-slate-100">
+                        <Image src={logoUrl} alt="Logo" fill sizes="36px" unoptimized className="object-cover" />
+                     </div>
+                  ) : (
+                     <div className="h-9 w-9 bg-[#0B4650] rounded-full flex items-center justify-center text-white font-bold text-sm shadow-sm ring-2 ring-white">
+                        {companyName.substring(0, 1).toUpperCase()}
+                     </div>
+                  )}
                 </div>
               </div>
             </header>
@@ -229,7 +257,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.2, ease: "easeOut" }}
-                  className="h-full max-w-7xl mx-auto"
+                  className="h-full max-w-[1920px] mx-auto"
                 >
                   {children}
                 </motion.div>
